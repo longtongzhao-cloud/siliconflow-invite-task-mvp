@@ -4,6 +4,7 @@ param()
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $evidence = Join-Path $root 'evidence'
+$pythonCommand = if (Get-Command python -ErrorAction SilentlyContinue) { 'python' } else { 'python3' }
 
 function Invoke-Checked {
     param(
@@ -20,19 +21,19 @@ function Invoke-Checked {
 }
 
 Invoke-Checked 'read-only-probe' {
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'probe.ps1')
+    & (Join-Path $root 'probe.ps1')
 }
 Invoke-Checked 'task-rules' {
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'test-task-rules.ps1')
+    & (Join-Path $root 'test-task-rules.ps1')
 }
 Invoke-Checked 'task-concurrency' {
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'test-task-concurrency.ps1')
+    & (Join-Path $root 'test-task-concurrency.ps1')
 }
 Invoke-Checked 'session-security' {
-    & python (Join-Path $root 'test-session-security.py')
+    & $pythonCommand (Join-Path $root 'test-session-security.py')
 }
 Invoke-Checked 'sensitive-output' {
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'test-sensitive-output.ps1')
+    & (Join-Path $root 'test-sensitive-output.ps1')
 }
 
 $ruleEvidence = Get-Content -Raw -Encoding UTF8 (Join-Path $evidence 'task-rule-tests.json') | ConvertFrom-Json
@@ -54,4 +55,3 @@ $summary = [ordered]@{
 $summaryPath = Join-Path $evidence 'validation-summary.json'
 $summary | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 -Path $summaryPath
 Write-Host "Validation package passed: $summaryPath"
-

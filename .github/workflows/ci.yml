@@ -10,11 +10,12 @@ permissions:
 
 jobs:
   test:
-    name: Python ${{ matrix.python-version }}
-    runs-on: windows-latest
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.12", "3.13"]
 
     steps:
@@ -45,11 +46,36 @@ jobs:
         working-directory: mvp
         run: python -m pytest -q
 
+      - name: Validate Linux entrypoints
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          bash -n mvp/run.sh
+          bash -n mvp/run-tests.sh
+          bash -n tech-validation/run-validation.sh
+
+      - name: Smoke-test Linux launcher
+        if: runner.os == 'Linux' && matrix.python-version == '3.13'
+        shell: bash
+        working-directory: mvp
+        run: |
+          bash ./run.sh >server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "${server_pid}" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8765/api/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat server.log
+          exit 1
+
       - name: Run deterministic validation checks
         shell: pwsh
         working-directory: tech-validation
         run: |
-          .\test-task-rules.ps1
-          .\test-task-concurrency.ps1
-          python .\test-session-security.py
-          .\test-sensitive-output.ps1
+          ./test-task-rules.ps1
+          ./test-task-concurrency.ps1
+          python ./test-session-security.py
+          ./test-sensitive-output.ps1

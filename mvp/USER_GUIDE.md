@@ -27,7 +27,7 @@
 
 ### 环境要求
 
-- Windows PowerShell；
+- Windows PowerShell，或 Linux/macOS Bash；
 - 已安装可从命令行调用的 Python；
 - 首次运行可访问 Python 软件包源；
 - 已进入克隆仓库的 `mvp` 目录。
@@ -54,6 +54,12 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1 -Port 8766
 ```
 
 开发验证码会在页面点击“获取验证码”后显示。管理员应使用启动环境中的 `MVP_ADMIN_KEY`；当前仓库已有本地演示配置说明，参见 `README.md`。任何演示值都不得复用于公网部署。
+
+Linux/macOS 在 `mvp` 目录执行 `./run.sh`。端口通过环境变量调整，例如：
+
+```bash
+MVP_PORT=8766 ./run.sh
+```
 
 ## 完整本地演示
 
@@ -190,6 +196,14 @@ powershell -ExecutionPolicy Bypass -File .\run-tests.ps1
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\run-validation.ps1
+```
+
+Linux/macOS 使用：
+
+```bash
+./run-tests.sh
+cd ../tech-validation
+./run-validation.sh
 ```
 
 测试只验证本地状态机、并发、安全边界和合成适配器，不等同于 SiliconFlow 或淘宝生产验收。

@@ -22,6 +22,13 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1
 
 打开 <http://127.0.0.1:8765>。
 
+Linux/macOS：
+
+```bash
+cd <仓库目录>/mvp
+./run.sh
+```
+
 本地演示凭据：
 
 - 本站手机号验证码：`135790`
@@ -69,6 +76,12 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\run-tests.ps1
+```
+
+Linux/macOS：
+
+```bash
+./run-tests.sh
 ```
 
 测试覆盖完整代理登录、密文检查、SKU 映射、登录/支付宝前置条件、N=1/5/10 并发、超时补做、保护名额、24 小时截止、提醒幂等和真实调用禁用。

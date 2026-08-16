@@ -29,6 +29,15 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1
 
 打开 <http://127.0.0.1:8765>。首次运行会在 `mvp/.venv` 创建虚拟环境并安装运行依赖。
 
+Linux/macOS Bash：
+
+```bash
+cd ./mvp
+./run.sh
+```
+
+Linux 修改监听地址或端口时使用环境变量，例如 `MVP_HOST=0.0.0.0 MVP_PORT=8766 ./run.sh`。
+
 运行应用测试：
 
 ```powershell
@@ -36,11 +45,25 @@ cd .\mvp
 powershell -ExecutionPolicy Bypass -File .\run-tests.ps1
 ```
 
+Linux/macOS：
+
+```bash
+cd ./mvp
+./run-tests.sh
+```
+
 运行完整技术验证：
 
 ```powershell
 cd .\tech-validation
 powershell -ExecutionPolicy Bypass -File .\run-validation.ps1
+```
+
+Linux 需要 PowerShell 7，然后执行：
+
+```bash
+cd ./tech-validation
+./run-validation.sh
 ```
 
 完整操作流程见 [MVP 使用说明](mvp/USER_GUIDE.md)，当前状态和后续顺序见 [项目交接文档](mvp/PROJECT_STATUS.md)。

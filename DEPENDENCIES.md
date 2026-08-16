@@ -4,7 +4,7 @@
 
 ## Python
 
-项目代码基线为 Python 3.11 及以上。当前本地验证环境是 Python 3.13.9；GitHub CI 配置为 Python 3.12 和 3.13。
+项目代码基线为 Python 3.11 及以上。当前本地验证环境是 Windows/Python 3.13.9；GitHub CI 同时覆盖 Ubuntu 和 Windows 的 Python 3.12、3.13。
 
 运行依赖位于 `mvp/requirements.txt`：
 
@@ -41,9 +41,9 @@ python -m pip check
 
 ## 验证工具
 
-`tech-validation/` 需要 Windows PowerShell 5.1 或 PowerShell 7。会话安全脚本还需要 Python 和 `cryptography`。并发验证使用 PowerShell/C# 本地编译能力，不需要单独的项目包。
+`tech-validation/` 在 Windows 可使用 Windows PowerShell 5.1 或 PowerShell 7，在 Linux 需要 PowerShell 7 (`pwsh`)。会话安全脚本还需要 Python 和 `cryptography`。并发验证使用 PowerShell/C# 本地编译能力，不需要单独的项目包。
 
-完整验证中的只读探针会访问参考站点，因此可能受网络、站点状态或对方页面变更影响。GitHub CI 只运行确定性的本地规则、并发、会话安全和敏感输出检查，不运行外部网络探针。
+完整验证中的只读探针会访问参考站点，因此可能受网络、站点状态或对方页面变更影响。GitHub CI 只运行确定性的本地规则、并发、会话安全和敏感输出检查，不运行外部网络探针。Ubuntu CI 还会对 Bash 脚本做语法检查，并启动服务验证 `/api/health`。
 
 ## 升级规则
 

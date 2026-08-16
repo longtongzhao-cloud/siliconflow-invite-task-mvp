@@ -22,6 +22,18 @@ powershell -ExecutionPolicy Bypass -File .\test-sensitive-output.ps1
 
 完整 `run-validation.ps1` 还包含外部只读探针，应在需要重新核对参考站时单独运行，不作为普通代码 PR 的稳定前置条件。
 
+Linux/macOS 开发者运行：
+
+```bash
+cd ./mvp
+./run-tests.sh
+
+cd ../tech-validation
+./run-validation.sh
+```
+
+技术验证在 Linux 上需要 PowerShell 7。只验证应用代码时，运行 `mvp/run-tests.sh` 即可。
+
 ## 代码和数据要求
 
 - Python 代码保持现有类型标注和模块边界，避免把第三方网页字段扩散到业务层。

@@ -54,6 +54,7 @@
 | `static/styles.css` | 桌面/移动响应式样式 |
 | `tests/test_mvp.py` | 16 项 API、并发、安全和生命周期测试 |
 | `run.ps1` / `run-tests.ps1` | 本地启动和复验入口 |
+| `run.sh` / `run-tests.sh` | Linux/macOS 启动和复验入口 |
 | `requirements.txt` / `requirements-dev.txt` / `.env.example` | 运行依赖、开发测试依赖和非敏感配置模板 |
 | `README.md` / `MVP-STAGE-REPORT.md` | 使用说明和阶段验收结论 |
 | `USER_GUIDE.md` | 管理员、客户和抢单人的当前 MVP 操作手册及生产边界 |
@@ -100,6 +101,8 @@ powershell -ExecutionPolicy Bypass -File .\run-tests.ps1
 `git add --dry-run .` 已确认候选列表只包含源码、测试、文档和仓库配置；`mvp/.venv/`、`mvp/data/mvp.db`、缓存和 `tech-validation/evidence/*.json` 均被忽略。
 
 仓库整理时使用 `pip-audit` 发现旧版 `cryptography`、`pytest` 和 FastAPI 间接依赖 Starlette 存在已知漏洞，因此已升级并显式固定安全版本。升级后 `pip check` 返回 `No broken requirements found`，`pip-audit` 返回 `No known vulnerabilities found`；GitHub CI 会继续执行依赖漏洞审计。
+
+应用代码没有 Windows 专用运行时依赖。仓库已补充 Bash 入口，技术验证脚本已消除对子进程命令 `powershell` 的硬编码，GitHub CI 覆盖 Ubuntu/Windows 与 Python 3.12/3.13。当前电脑没有 WSL 或 Docker，因此 Linux 实机结果以 GitHub Ubuntu CI 为准。
 
 ## 已知问题与外部阻塞
 
@@ -153,6 +156,8 @@ powershell -ExecutionPolicy Bypass -File .\run-tests.ps1
 
 - 本地启动：`powershell -ExecutionPolicy Bypass -File .\run.ps1`
 - MVP 测试：`powershell -ExecutionPolicy Bypass -File .\run-tests.ps1`
+- Linux/macOS 启动：`./run.sh`
+- Linux/macOS 测试：`./run-tests.sh`
 - 技术验证：在 `../tech-validation/` 执行 `powershell -ExecutionPolicy Bypass -File .\run-validation.ps1`
 - 阶段结论：`MVP-STAGE-REPORT.md`
 - 当前版本使用说明：`USER_GUIDE.md`

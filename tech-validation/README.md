@@ -21,6 +21,12 @@ PowerShell 7 or Windows PowerShell 5.1:
 powershell -ExecutionPolicy Bypass -File .\run-validation.ps1
 ```
 
+Linux with PowerShell 7 installed:
+
+```bash
+./run-validation.sh
+```
+
 Or run each check independently:
 
 ```powershell

@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+venv_root="${project_root}/.venv"
+
+if command -v python3 >/dev/null 2>&1; then
+  bootstrap_python="python3"
+elif command -v python >/dev/null 2>&1; then
+  bootstrap_python="python"
+else
+  echo "Python 3.11 or newer is required." >&2
+  exit 1
+fi
+
+if [[ ! -x "${venv_root}/bin/python" && ! -x "${venv_root}/Scripts/python.exe" ]]; then
+  "${bootstrap_python}" -m venv "${venv_root}"
+fi
+
+if [[ -x "${venv_root}/bin/python" ]]; then
+  venv_python="${venv_root}/bin/python"
+else
+  venv_python="${venv_root}/Scripts/python.exe"
+fi
+
+"${venv_python}" -m pip install --disable-pip-version-check -q \
+  -r "${project_root}/requirements-dev.txt"
+
+cd "${project_root}"
+exec "${venv_python}" -m pytest -q

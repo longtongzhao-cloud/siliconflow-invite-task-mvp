@@ -104,7 +104,7 @@ powershell -ExecutionPolicy Bypass -File .\run-tests.ps1
 
 ## Git 状态
 
-仓库根目录为 `outputs/`，包含应用与技术验证包。已在该目录初始化 `main` 分支，并添加 `.gitignore`、`.gitattributes`、`.editorconfig`、依赖说明、贡献指南、安全说明、PR 模板和 GitHub CI。GitHub 私有仓库为 `longtongzhao-cloud/siliconflow-invite-task-mvp`，首个基线提交和推送于 2026-08-16 完成。
+仓库根目录为 `outputs/`，包含应用与技术验证包。已在该目录初始化 `main` 分支，并添加 `.gitignore`、`.gitattributes`、`.editorconfig`、依赖说明、贡献指南、安全说明、PR 模板和 GitHub CI。GitHub 公开仓库为 `longtongzhao-cloud/siliconflow-invite-task-mvp`，首个基线提交和推送于 2026-08-16 完成。
 
 `git add --dry-run .` 已确认候选列表只包含源码、测试、文档和仓库配置；`mvp/.venv/`、`mvp/data/mvp.db`、缓存和 `tech-validation/evidence/*.json` 均被忽略。
 

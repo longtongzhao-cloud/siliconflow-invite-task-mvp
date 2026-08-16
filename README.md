@@ -81,7 +81,7 @@ cd ./tech-validation
 
 ## GitHub 仓库
 
-私有仓库：<https://github.com/longtongzhao-cloud/siliconflow-invite-task-mvp>
+公开仓库：<https://github.com/longtongzhao-cloud/siliconflow-invite-task-mvp>
 
 首次克隆：
 

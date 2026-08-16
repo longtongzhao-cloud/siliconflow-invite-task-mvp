@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>邀新任务台</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="邀新任务台首页">
+      <span class="brand-mark">邀</span>
+      <span>邀新任务台</span>
+    </a>
+    <nav class="nav" id="mainNav" aria-label="主要导航">
+      <button type="button" data-view="tasks">任务大厅</button>
+      <button type="button" data-view="mine">我的任务</button>
+      <button type="button" data-view="admin">订单管理</button>
+    </nav>
+    <button type="button" class="account-button" id="accountButton">手机号登录</button>
+  </header>
+
+  <main id="app" class="app-shell" aria-live="polite">
+    <div class="loading">正在加载...</div>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <dialog id="authDialog" class="dialog">
+    <form method="dialog" class="dialog-head">
+      <div>
+        <p class="eyebrow">本站账号</p>
+        <h2>手机号登录</h2>
+      </div>
+      <button class="icon-close" value="cancel" aria-label="关闭">×</button>
+    </form>
+    <form id="authForm" class="form-stack">
+      <label>手机号
+        <input id="loginPhone" type="tel" inputmode="numeric" autocomplete="tel" maxlength="13" required placeholder="请输入手机号">
+      </label>
+      <div class="code-row">
+        <label>验证码
+          <input id="loginCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required placeholder="6 位验证码">
+        </label>
+        <button id="sendSiteCode" class="button secondary" type="button">获取验证码</button>
+      </div>
+      <p id="siteCodeHint" class="form-hint"></p>
+      <button class="button primary" type="submit">登录</button>
+    </form>
+  </dialog>
+
+  <dialog id="alipayDialog" class="dialog">
+    <form method="dialog" class="dialog-head">
+      <div>
+        <p class="eyebrow">领取奖励前完成</p>
+        <h2>登记支付宝收款信息</h2>
+      </div>
+      <button class="icon-close" value="cancel" aria-label="关闭">×</button>
+    </form>
+    <form id="alipayForm" class="form-stack">
+      <label>支付宝账号
+        <input id="alipayAccount" autocomplete="off" required placeholder="手机号或邮箱">
+      </label>
+      <label>收款人姓名
+        <input id="alipayName" autocomplete="name" required placeholder="请与支付宝账户一致">
+      </label>
+      <p class="form-hint">第一版由管理员人工转账，信息仅供本次奖励结算。</p>
+      <button class="button primary" type="submit">确认登记</button>
+    </form>
+  </dialog>
+</body>
+</html>
+

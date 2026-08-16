@@ -2,7 +2,14 @@
 set -euo pipefail
 
 project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-venv_root="${project_root}/.venv"
+
+if [[ -n "${MVP_VENV_PATH:-}" ]]; then
+  venv_root="${MVP_VENV_PATH}"
+elif [[ -r /proc/sys/kernel/osrelease ]] && grep -qi microsoft /proc/sys/kernel/osrelease; then
+  venv_root="${XDG_CACHE_HOME:-${HOME}/.cache}/siliconflow-invite-task-mvp/venv"
+else
+  venv_root="${project_root}/.venv"
+fi
 
 if command -v python3 >/dev/null 2>&1; then
   bootstrap_python="python3"

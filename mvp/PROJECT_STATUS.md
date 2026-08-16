@@ -54,7 +54,7 @@
 | `static/styles.css` | 桌面/移动响应式样式 |
 | `tests/test_mvp.py` | 16 项 API、并发、安全和生命周期测试 |
 | `run.ps1` / `run-tests.ps1` | 本地启动和复验入口 |
-| `run.sh` / `run-tests.sh` | Linux/macOS 启动和复验入口 |
+| `run.sh` / `run-tests.sh` / `smoke-test.sh` | Linux/macOS 启动、测试和服务健康检查入口 |
 | `requirements.txt` / `requirements-dev.txt` / `.env.example` | 运行依赖、开发测试依赖和非敏感配置模板 |
 | `README.md` / `MVP-STAGE-REPORT.md` | 使用说明和阶段验收结论 |
 | `USER_GUIDE.md` | 管理员、客户和抢单人的当前 MVP 操作手册及生产边界 |
@@ -92,6 +92,14 @@ powershell -ExecutionPolicy Bypass -File .\run-tests.ps1
 - 合成会话安全：8/8；
 - Markdown/JSON 敏感输出扫描：13 个文件通过。
 
+同日在 WSL2 Ubuntu 24.04.1 上执行原生 Linux 复验：
+
+- Linux Python 3.12.3，虚拟环境解释器解析到 `/usr/bin/python3.12`；
+- `./run-tests.sh`：`16 passed in 5.94s`；
+- `./smoke-test.sh`：Uvicorn 启动成功，`/api/health` 返回 200 和预期 JSON；
+- PowerShell 7.6.5 下完整技术验证通过：只读端点 23、业务规则 5/5、并发 6/6、会话安全 8/8、敏感输出扫描通过；
+- Linux 虚拟环境 `pip check` 无依赖冲突，`pip-audit` 未发现已知漏洞。
+
 此前浏览器验收已覆盖任务大厅、客户代理登录 mock、抢单、认证、管理台、桌面和 390px 移动端；无横向溢出，控制台 0 个错误/警告。本次核对时本地服务未运行，使用 `run.ps1` 启动。
 
 ## Git 状态
@@ -102,7 +110,7 @@ powershell -ExecutionPolicy Bypass -File .\run-tests.ps1
 
 仓库整理时使用 `pip-audit` 发现旧版 `cryptography`、`pytest` 和 FastAPI 间接依赖 Starlette 存在已知漏洞，因此已升级并显式固定安全版本。升级后 `pip check` 返回 `No broken requirements found`，`pip-audit` 返回 `No known vulnerabilities found`；GitHub CI 会继续执行依赖漏洞审计。
 
-应用代码没有 Windows 专用运行时依赖。仓库已补充 Bash 入口，技术验证脚本已消除对子进程命令 `powershell` 的硬编码，GitHub CI 覆盖 Ubuntu/Windows 与 Python 3.12/3.13。当前电脑没有 WSL 或 Docker，因此 Linux 实机结果以 GitHub Ubuntu CI 为准。
+应用代码没有 Windows 专用运行时依赖。仓库已补充 Bash 入口，技术验证脚本已消除对子进程命令 `powershell` 的硬编码，GitHub CI 覆盖 Ubuntu/Windows 与 Python 3.12/3.13。WSL2 Ubuntu 24.04.1 已完成原生复验；共享工作区使用独立 Linux 虚拟环境，避免误用 Windows `.venv`。
 
 ## 已知问题与外部阻塞
 

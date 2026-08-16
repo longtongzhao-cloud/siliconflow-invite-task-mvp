@@ -52,24 +52,13 @@ jobs:
         run: |
           bash -n mvp/run.sh
           bash -n mvp/run-tests.sh
+          bash -n mvp/smoke-test.sh
           bash -n tech-validation/run-validation.sh
 
       - name: Smoke-test Linux launcher
         if: runner.os == 'Linux' && matrix.python-version == '3.13'
         shell: bash
-        working-directory: mvp
-        run: |
-          bash ./run.sh >server.log 2>&1 &
-          server_pid=$!
-          trap 'kill "${server_pid}" 2>/dev/null || true' EXIT
-          for attempt in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:8765/api/health >/dev/null; then
-              exit 0
-            fi
-            sleep 1
-          done
-          cat server.log
-          exit 1
+        run: ./mvp/smoke-test.sh
 
       - name: Run deterministic validation checks
         shell: pwsh

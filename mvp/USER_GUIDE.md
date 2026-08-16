@@ -61,6 +61,8 @@ Linux/macOS 在 `mvp` 目录执行 `./run.sh`。端口通过环境变量调整�
 MVP_PORT=8766 ./run.sh
 ```
 
+Ubuntu/WSL 首次运行需要先执行 `sudo apt-get install python3-venv`。WSL 会自动使用 `~/.cache/siliconflow-invite-task-mvp/venv`，不会与 Windows 的 `mvp/.venv` 混用。服务健康检查可执行 `./smoke-test.sh`。
+
 ## 完整本地演示
 
 建议使用三个浏览器窗口或无痕窗口分别扮演管理员、客户和抢单人。不要输入真实支付宝资料或其他生产数据。

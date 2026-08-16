@@ -38,6 +38,8 @@ cd ./mvp
 
 Linux 修改监听地址或端口时使用环境变量，例如 `MVP_HOST=0.0.0.0 MVP_PORT=8766 ./run.sh`。
 
+在 WSL 中直接运行 Windows 挂载目录里的项目时，脚本会自动把 Linux 虚拟环境放到 `~/.cache/siliconflow-invite-task-mvp/venv`，避免误用 Windows 的 `mvp/.venv`。可通过 `MVP_VENV_PATH` 自定义位置。
+
 运行应用测试：
 
 ```powershell
@@ -51,6 +53,8 @@ Linux/macOS：
 cd ./mvp
 ./run-tests.sh
 ```
+
+Linux 服务启动冒烟测试：`./mvp/smoke-test.sh`。
 
 运行完整技术验证：
 

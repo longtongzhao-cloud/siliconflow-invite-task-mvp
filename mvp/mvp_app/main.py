@@ -285,6 +285,7 @@ def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "environment": ENV,
+        "taobao_order_mode": "manual",
         "silicon_default_mode": DEFAULT_SILICON_MODE,
         "site_sms_mode": SETTINGS.site_sms_mode,
         "remote_browser_mode": SETTINGS.remote_browser_mode,

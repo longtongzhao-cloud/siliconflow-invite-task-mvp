@@ -247,7 +247,7 @@ async function renderMine() {
 
 function adminLoginPanel(error = "") {
   appRoot.innerHTML = `
-    ${pageHeading("运营工作台", "订单管理", "按淘宝付款订单创建 1 人、5 人或 10 人任务。")}
+    ${pageHeading("运营工作台", "订单管理", "人工确认淘宝付款后建单，并将专属链接发送给客户。")}
     <div class="panel">
       <h2>管理员验证</h2>
       ${error ? `<div class="notice error">${escapeHtml(error)}</div>` : ""}
@@ -276,13 +276,19 @@ async function renderAdmin() {
     return;
   }
   appRoot.innerHTML = `
-    ${pageHeading("运营工作台", "订单管理", "付款订单建单、人工审核和支付宝转账登记。")}
+    ${pageHeading("运营工作台", "订单管理", "人工核对付款、人工发送客户链接、人工审核和转账登记。")}
     <div id="createdOrder"></div>
     <section class="panel">
-      <h2>创建付款订单</h2>
+      <p class="eyebrow">人工订单流程</p>
+      <h2>确认付款后建单</h2>
+      <ol class="workflow-list">
+        <li>在淘宝或千牛人工确认客户已经付款</li>
+        <li>核对订单号、SKU 和购买数量后生成专属链接</li>
+        <li>把客户链接人工发送给对应买家</li>
+      </ol>
       <form id="orderForm" class="form-stack">
         <div class="form-grid">
-          <label>淘宝订单号<input id="taobaoTid" required value="T${Date.now()}" maxlength="64"></label>
+          <label>淘宝订单号（人工核对）<input id="taobaoTid" required value="T${Date.now()}" maxlength="64"></label>
           <label>SKU
             <select id="orderSku"><option value="SF_INVITE_1">1 人</option><option value="SF_INVITE_5">5 人</option><option value="SF_INVITE_10">10 人</option></select>
           </label>
@@ -291,7 +297,7 @@ async function renderAdmin() {
             <select id="siliconMode"><option value="mock">本地代理登录演示</option><option value="manual">人工邀请码</option><option value="live-disabled">真实调用禁用</option></select>
           </label>
         </div>
-        <button class="button primary" type="submit">生成订单链接</button>
+        <button class="button primary" type="submit">人工建单并生成客户链接</button>
       </form>
     </section>
     <section class="section">
@@ -334,12 +340,11 @@ async function createAdminOrder(event) {
       },
     });
     const customerUrl = location.origin + order.customer_url;
-    const taskUrl = location.origin + order.task_url;
     document.querySelector("#createdOrder").innerHTML = `
-      <div class="panel"><h2>订单链接已生成</h2>
-        <p class="muted">淘宝聊天自动发送权限未启用，请人工发送客户订单链接。</p>
+      <div class="panel"><h2>客户链接已生成</h2>
+        <div class="notice warning">请只把此链接发送给当前淘宝买家，不要发到群聊或公开页面。</div>
         <label>客户订单链接<div class="copy-field"><input readonly value="${escapeHtml(customerUrl)}"><button class="button secondary" data-copy="${escapeHtml(customerUrl)}">复制</button></div></label>
-        <label>任务链接<div class="copy-field"><input readonly value="${escapeHtml(taskUrl)}"><button class="button secondary" data-copy="${escapeHtml(taskUrl)}">复制</button></div></label>
+        <p class="form-hint">客户登录并取得邀请码后，任务链接会显示在客户页面，再由运营人员发送到任务渠道。</p>
       </div>`;
     bindCopyButtons();
     toast("订单创建成功");
@@ -386,8 +391,16 @@ async function renderCustomer(rawToken) {
   }
   const active = order.status === "ACTIVE" && order.invitation_code;
   const taskUrl = location.origin + order.task_url;
+  const remoteLoginAvailable = Boolean(order.browser_handoff?.enabled);
+  const mockLoginAvailable = Boolean(order.adapter?.proxy_login);
+  const loginAvailable = remoteLoginAvailable || mockLoginAvailable;
+  const loginStatus = remoteLoginAvailable
+    ? "登录会话最长保留 5 分钟未操作时间"
+    : mockLoginAvailable
+      ? "本地演示模式：点击后填写测试手机号和验证码"
+      : "真实登录网关尚未配置，请切换到手动填写";
   appRoot.innerHTML = `
-    <div class="detail-title"><p class="eyebrow">淘宝订单 ${escapeHtml(order.taobao_tid)}</p><h1>配置邀请任务</h1><p>目标 ${order.target} 人 · 订单截止 ${formatTime(order.expires_at)}</p></div>
+    <div class="detail-title"><p class="eyebrow">人工订单 ${escapeHtml(order.taobao_tid)}</p><h1>${active ? "邀请任务已就绪" : "开始 SiliconFlow 登录"}</h1><p>目标 ${order.target} 人 · 订单截止 ${formatTime(order.expires_at)}</p></div>
     <div class="detail-layout">
       <div class="detail-main">
         ${active ? `<div class="panel">
@@ -395,18 +408,17 @@ async function renderCustomer(rawToken) {
           <dl class="key-value"><dt>8 位邀请码</dt><dd>${escapeHtml(order.invitation_code)}</dd><dt>邀请链接</dt><dd>${escapeHtml(order.invitation_url)}</dd><dt>任务链接</dt><dd>${escapeHtml(taskUrl)}</dd></dl>
           <div class="button-row"><button class="button primary" data-copy="${escapeHtml(taskUrl)}">复制任务链接</button><a class="button secondary" href="${order.task_url}">打开任务页</a></div>
         </div>` : `<div class="panel">
-          <div class="tabs" role="tablist"><button id="proxyTab" class="active" role="tab" aria-selected="true" aria-controls="proxyPane">手机安全登录</button><button id="manualTab" role="tab" aria-selected="false" aria-controls="manualPane">手动填写</button></div>
+          <div class="tabs" role="tablist"><button id="proxyTab" class="active" role="tab" aria-selected="true" aria-controls="proxyPane">SiliconFlow 登录</button><button id="manualTab" role="tab" aria-selected="false" aria-controls="manualPane">手动填写</button></div>
           <div id="proxyPane">
             <form id="handoffForm" class="form-stack">
               <label class="checkbox"><input id="handoffConsent" type="checkbox" required><span>我授权本站启动一次性浏览器会话并读取邀请码；该授权不代表 SiliconFlow 官方接入许可。</span></label>
-              <button class="button primary" type="submit" ${order.browser_handoff?.enabled ? "" : "disabled"}>开始手机安全登录</button>
-              <p id="handoffStatus" class="form-hint" role="status">${order.browser_handoff?.enabled ? "会话最长保留 5 分钟未操作时间" : "远程浏览器网关尚未配置，请使用手动填写"}</p>
+              <button class="button primary" type="submit" ${loginAvailable ? "" : "disabled"}>开始 SiliconFlow 登录</button>
+              <p id="handoffStatus" class="form-hint" role="status">${loginStatus}</p>
             </form>
-            ${order.adapter.proxy_login ? `<div class="development-block"><p class="eyebrow">本地开发演示</p><form id="proxyForm" class="form-stack">
+            ${mockLoginAvailable ? `<div id="mockProxyBlock" class="development-block" hidden><p class="eyebrow">本地开发演示</p><form id="proxyForm" class="form-stack">
               <label>SiliconFlow 注册手机号<input id="sfPhone" type="tel" inputmode="numeric" required placeholder="请输入邀请人手机号"></label>
               <div class="code-row"><label>SiliconFlow 验证码<input id="sfOtp" inputmode="numeric" maxlength="6" required placeholder="6 位验证码"></label><button id="sendSfCode" type="button" class="button secondary">获取验证码</button></div>
               <p id="sfCodeHint" class="form-hint"></p>
-              <label class="checkbox"><input id="sfConsent" type="checkbox" required><span>我授权本站代为提交登录信息、读取邀请码，并将会话令牌加密保存最长 24 小时。</span></label>
               <button class="button primary" type="submit">获取邀请码</button>
             </form></div>` : ""}
           </div>
@@ -444,6 +456,13 @@ function bindCustomerForms(rawToken, order) {
   document.querySelector("#handoffForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const status = document.querySelector("#handoffStatus");
+    if (!order.browser_handoff?.enabled && order.adapter?.proxy_login) {
+      const block = document.querySelector("#mockProxyBlock");
+      block.hidden = false;
+      status.textContent = "本地演示登录已开始，请填写测试手机号和验证码";
+      document.querySelector("#sfPhone").focus();
+      return;
+    }
     try {
       status.textContent = "正在创建安全会话...";
       const data = await api(`/api/customer/${encodeURIComponent(rawToken)}/silicon/handoffs`, {
@@ -469,7 +488,7 @@ function bindCustomerForms(rawToken, order) {
         method: "POST", body: {
           phone: document.querySelector("#sfPhone").value,
           otp: document.querySelector("#sfOtp").value,
-          consent: document.querySelector("#sfConsent").checked,
+          consent: document.querySelector("#handoffConsent").checked,
         },
       });
       toast("邀请码获取成功，会话已加密保存");

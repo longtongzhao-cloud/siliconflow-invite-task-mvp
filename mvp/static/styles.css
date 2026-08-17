@@ -216,6 +216,8 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px 
 .development-block { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
 .official-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
 .upstream-form { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
+.workflow-list { margin: 10px 0 20px; padding-left: 22px; color: var(--muted); }
+.workflow-list li + li { margin-top: 7px; }
 
 .tabs { display: flex; gap: 4px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
 .tabs button { padding: 10px 14px; color: var(--muted); background: transparent; border: 0; border-bottom: 2px solid transparent; }

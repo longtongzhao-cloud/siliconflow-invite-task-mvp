@@ -142,6 +142,21 @@ def test_sku_mapping(client: TestClient, sku: str, expected: int) -> None:
     assert order["target"] == expected
 
 
+def test_admin_manual_order_requires_no_taobao_event(
+    client: TestClient, database_path: Path
+) -> None:
+    order = create_order(client, "T-MANUAL-ORDER", "SF_INVITE_5", "manual")
+    assert order["delivery_mode"] == "MANUAL_REQUIRED"
+    assert order["customer_url"].startswith("/o/")
+    assert client.get("/api/health").json()["taobao_order_mode"] == "manual"
+    with sqlite3.connect(database_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM taobao_events").fetchone()[0] == 0
+        created = conn.execute(
+            "SELECT COUNT(*) FROM audit_events WHERE action='CREATE_ORDER'"
+        ).fetchone()[0]
+        assert created == 1
+
+
 def test_claim_requires_login_and_alipay(client: TestClient) -> None:
     order = create_order(client, "T-AUTH-001", mode="manual")
     activate_manual(client, order)

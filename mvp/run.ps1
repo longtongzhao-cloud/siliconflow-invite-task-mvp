@@ -19,6 +19,7 @@ $env:PYTHONPATH = $ProjectRoot
 $env:MVP_ENV = 'development'
 $env:MVP_DB_PATH = Join-Path $ProjectRoot 'data\mvp.db'
 $env:MVP_SILICON_MODE = 'mock'
+$env:MVP_SITE_SMS_MODE = 'mock'
 $env:MVP_SEED_DEMO = '1'
 if (-not $env:MVP_SECRET) { $env:MVP_SECRET = 'local-mvp-secret-change-before-production' }
 if (-not $env:MVP_ADMIN_KEY) { $env:MVP_ADMIN_KEY = 'mvp-admin-demo' }

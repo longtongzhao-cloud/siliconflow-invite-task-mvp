@@ -4,17 +4,17 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import secrets
 import time
 from typing import Any
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from .config import SETTINGS
+
 
 def _secret() -> bytes:
-    value = os.getenv("MVP_SECRET", "local-mvp-secret-change-before-production")
-    return value.encode("utf-8")
+    return SETTINGS.secret.encode("utf-8")
 
 
 def _key(purpose: str) -> bytes:
@@ -90,4 +90,3 @@ def mask_alipay(account: str) -> str:
     if len(account) <= 5:
         return "***"
     return f"{account[:3]}***{account[-3:]}"
-

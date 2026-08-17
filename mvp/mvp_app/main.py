@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hmac
 import json
-import os
 import re
 import sqlite3
 from contextlib import asynccontextmanager
@@ -16,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from . import database as db
 from .adapters import AdapterError, adapter_result, get_silicon_adapter, parse_invitation, target_people
+from .config import SETTINGS
 from .security import (
     decrypt_text,
     encrypt_text,
@@ -31,23 +31,21 @@ from .security import (
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 STATIC_DIR = BASE_DIR / "static"
-ENV = os.getenv("MVP_ENV", "development")
-DEFAULT_SILICON_MODE = os.getenv("MVP_SILICON_MODE", "mock" if ENV == "development" else "live-disabled")
-ADMIN_KEY = os.getenv("MVP_ADMIN_KEY", "mvp-admin-demo")
-SITE_OTP = "135790"
+ENV = SETTINGS.environment
+DEFAULT_SILICON_MODE = SETTINGS.silicon_mode
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.init_schema()
-    if ENV == "development" and os.getenv("MVP_SEED_DEMO", "1") == "1":
+    if SETTINGS.is_development and SETTINGS.seed_demo:
         db.seed_demo_orders(DEFAULT_SILICON_MODE)
     yield
 
 
 app = FastAPI(
     title="邀新任务台 MVP",
-    docs_url="/api/docs" if ENV == "development" else None,
+    docs_url="/api/docs" if SETTINGS.is_development else None,
     lifespan=lifespan,
 )
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
@@ -151,8 +149,14 @@ def require_web_request(request: Request) -> None:
 
 
 def require_admin(x_admin_key: str | None) -> None:
-    if not x_admin_key or not hmac.compare_digest(x_admin_key, ADMIN_KEY):
+    if not x_admin_key or not hmac.compare_digest(x_admin_key, SETTINGS.admin_key):
         raise HTTPException(401, "管理员密钥不正确")
+
+
+def require_site_sms() -> str:
+    if SETTINGS.site_sms_mode != "mock" or not SETTINGS.development_site_otp:
+        raise AdapterError("SITE_SMS_DISABLED", "本站短信服务尚未启用", 503)
+    return SETTINGS.development_site_otp
 
 
 def get_order_by_customer_token(conn: sqlite3.Connection, raw_token: str) -> sqlite3.Row:
@@ -235,12 +239,14 @@ def health() -> dict[str, Any]:
         "status": "ok",
         "environment": ENV,
         "silicon_default_mode": DEFAULT_SILICON_MODE,
+        "site_sms_mode": SETTINGS.site_sms_mode,
         "real_upstream_writes_enabled": False,
     }
 
 
 @app.post("/api/auth/send-code")
 def send_site_code(body: PhoneRequest) -> dict[str, Any]:
+    site_otp = require_site_sms()
     phone = normalize_phone(body.phone)
     current = db.now_ts()
     phone_key = hmac_hex(phone, "phone-index")
@@ -256,17 +262,18 @@ def send_site_code(body: PhoneRequest) -> dict[str, Any]:
             INSERT INTO site_otps(id,phone_hmac,phone_mask,code_hmac,expires_at,created_at)
             VALUES(?,?,?,?,?,?)
             """,
-            (db.new_id("otp"), phone_key, mask_phone(phone), hmac_hex(SITE_OTP, "site-otp"),
+            (db.new_id("otp"), phone_key, mask_phone(phone), hmac_hex(site_otp, "site-otp"),
              current + 300, current),
         )
     response = {"masked_phone": mask_phone(phone), "expires_in_seconds": 300}
-    if ENV == "development":
-        response["debug_code"] = SITE_OTP
+    if SETTINGS.is_development:
+        response["debug_code"] = site_otp
     return response
 
 
 @app.post("/api/auth/verify")
 def verify_site_code(body: PhoneVerify, response: Response) -> dict[str, Any]:
+    require_site_sms()
     phone = normalize_phone(body.phone)
     current = db.now_ts()
     phone_key = hmac_hex(phone, "phone-index")
@@ -294,7 +301,7 @@ def verify_site_code(body: PhoneVerify, response: Response) -> dict[str, Any]:
             user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         audit(conn, "USER", user["id"], "LOGIN", "USER", user["id"])
     response.set_cookie(
-        "mvp_session", sign_session(user["id"]), httponly=True, secure=ENV == "production",
+        "mvp_session", sign_session(user["id"]), httponly=True, secure=not SETTINGS.is_development,
         samesite="lax", max_age=7 * 24 * 3600, path="/",
     )
     return {"user": {"id": user["id"], "phone": user["phone_mask"], "alipay_bound": bool(user["alipay_hmac"])}}

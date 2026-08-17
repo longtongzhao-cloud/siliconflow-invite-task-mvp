@@ -1,6 +1,6 @@
 # 邀新任务台 MVP 使用说明
 
-最后核对日期：2026-08-16  
+最后核对日期：2026-08-17
 适用版本：当前本地 MVP
 
 ## 使用边界
@@ -9,7 +9,7 @@
 
 - SiliconFlow 真实登录、邀请码读取、注册和实名认证状态查询尚未接通。
 - 淘宝订单同步、店铺授权、消息订阅及聊天自动发送尚未接通。
-- 本站手机号登录使用开发验证码，不会发送真实短信。
+- 本站手机号登录只在开发模式使用演示验证码，不会发送真实短信；生产模式会禁用该接口，直至接入真实短信。
 - 支付宝奖励由管理员线下转账，系统只登记支付结果，不会自动付款。
 - 本地服务默认只允许本机访问，没有公网 HTTPS、生产级管理员认证、备份和监控。
 
@@ -54,6 +54,8 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1 -Port 8766
 ```
 
 开发验证码会在页面点击“获取验证码”后显示。管理员应使用启动环境中的 `MVP_ADMIN_KEY`；当前仓库已有本地演示配置说明，参见 `README.md`。任何演示值都不得复用于公网部署。
+
+生产配置参考 `.env.production.example`。应用会拒绝生产环境中的演示密钥、示例占位值、mock 短信、mock SiliconFlow 和演示数据初始化。该保护不代表生产接入已经完成；真实短信尚未接通时，手机号发送和校验接口会返回“本站短信服务尚未启用”。
 
 Linux/macOS 在 `mvp` 目录执行 `./run.sh`。端口通过环境变量调整，例如：
 
@@ -194,7 +196,7 @@ Mock 按钮只在 `development` 环境出现，不能证明真人已经在 Silic
 powershell -ExecutionPolicy Bypass -File .\run-tests.ps1
 ```
 
-当前基线应得到 16 项测试通过。外部技术验证在 `..\tech-validation` 目录执行：
+当前基线应得到 35 项测试通过。外部技术验证在 `..\tech-validation` 目录执行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\run-validation.ps1

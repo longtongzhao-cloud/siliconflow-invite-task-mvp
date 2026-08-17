@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!mvp/.env.production.example
 *.pem
 *.key
 *.p12
@@ -51,4 +52,3 @@ Desktop.ini
 *.tmp
 *.bak
 *.orig
-

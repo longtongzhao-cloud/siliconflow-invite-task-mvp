@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ os.environ["MVP_ADMIN_KEY"] = "mvp-admin-demo"
 os.environ["MVP_SECRET"] = "test-only-secret-with-more-than-32-bytes"
 
 from mvp_app import database as db  # noqa: E402
+from mvp_app import main as main_module  # noqa: E402
 from mvp_app.main import app  # noqa: E402
 
 
@@ -258,6 +260,31 @@ def test_live_disabled_adapter_fails_closed(client: TestClient) -> None:
     response = client.post(endpoint, json={"phone": "13800000009"})
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "POLICY_DISABLED"
+
+
+def test_disabled_site_sms_fails_closed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        main_module,
+        "SETTINGS",
+        replace(
+            main_module.SETTINGS,
+            site_sms_mode="disabled",
+            development_site_otp=None,
+        ),
+    )
+
+    sent = client.post("/api/auth/send-code", json={"phone": "13900000010"})
+    verified = client.post(
+        "/api/auth/verify",
+        json={"phone": "13900000010", "code": "135790"},
+    )
+
+    assert sent.status_code == 503
+    assert sent.json()["error"]["code"] == "SITE_SMS_DISABLED"
+    assert verified.status_code == 503
+    assert verified.json()["error"]["code"] == "SITE_SMS_DISABLED"
 
 
 def test_expired_silicon_session_is_deleted(client: TestClient, database_path: Path) -> None:

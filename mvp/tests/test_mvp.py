@@ -64,6 +64,7 @@ def create_order(client: TestClient, tid: str, sku: str = "SF_INVITE_1", mode: s
 def activate_manual(client: TestClient, order: dict, code: str = "ABCD1234") -> None:
     response = client.post(
         f"{order['customer_url']}/manual-invitation".replace("/o/", "/api/customer/"),
+        headers=WEB_HEADERS,
         json={"invitation": code, "consent": True},
     )
     assert response.status_code == 200, response.text
@@ -73,12 +74,17 @@ def test_full_proxy_login_claim_reward_and_payout(client: TestClient, database_p
     order = create_order(client, "T-FULL-001", "SF_INVITE_1", "mock")
     customer_api = order["customer_url"].replace("/o/", "/api/customer/")
 
-    sent = client.post(f"{customer_api}/silicon/send-code", json={"phone": "13800000001"})
+    sent = client.post(
+        f"{customer_api}/silicon/send-code",
+        headers=WEB_HEADERS,
+        json={"phone": "13800000001"},
+    )
     assert sent.status_code == 200
     assert sent.json()["debug_code"] == "246810"
 
     logged_in = client.post(
         f"{customer_api}/silicon/login",
+        headers=WEB_HEADERS,
         json={"phone": "13800000001", "otp": "246810", "consent": True},
     )
     assert logged_in.status_code == 200, logged_in.text
@@ -257,7 +263,9 @@ def test_fifteen_minute_reminder_is_idempotent(client: TestClient, database_path
 def test_live_disabled_adapter_fails_closed(client: TestClient) -> None:
     order = create_order(client, "T-DISABLED-001", mode="live-disabled")
     endpoint = order["customer_url"].replace("/o/", "/api/customer/") + "/silicon/send-code"
-    response = client.post(endpoint, json={"phone": "13800000009"})
+    response = client.post(
+        endpoint, headers=WEB_HEADERS, json={"phone": "13800000009"}
+    )
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "POLICY_DISABLED"
 
@@ -292,6 +300,7 @@ def test_expired_silicon_session_is_deleted(client: TestClient, database_path: P
     customer_api = order["customer_url"].replace("/o/", "/api/customer/")
     response = client.post(
         f"{customer_api}/silicon/login",
+        headers=WEB_HEADERS,
         json={"phone": "13800000008", "otp": "246810", "consent": True},
     )
     assert response.status_code == 200
@@ -338,3 +347,217 @@ def test_taobao_production_webhook_fails_closed(client: TestClient) -> None:
     response = client.post("/api/integrations/taobao/webhook", json={})
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "TAOBAO_INTEGRATION_DISABLED"
+
+
+def test_invitation_is_visible_only_after_claim(client: TestClient) -> None:
+    order = create_order(client, "T-INVITE-VISIBILITY", mode="manual")
+    activate_manual(client, order)
+    slug = order["task_url"].split("/t/", 1)[1]
+
+    public_detail = client.get(f"/api/tasks/{slug}")
+    public_list = client.get("/api/tasks")
+    assert public_detail.status_code == 200
+    assert "invitation_code" not in public_detail.json()
+    assert "invitation_url" not in public_detail.json()
+    assert "invitation_code" not in public_list.json()["tasks"][0]
+
+    register_worker(client, "13900000011", "invite-visibility@example.com")
+    assert client.post(f"/api/tasks/{slug}/claim", headers=WEB_HEADERS).status_code == 200
+    assignment = client.get("/api/me/assignments").json()["assignments"][0]
+    assert assignment["invitation_code"] == "ABCD1234"
+    assert assignment["invitation_url"].endswith("/ABCD1234")
+
+
+def test_worker_submits_encrypted_silicon_account_for_review(
+    client: TestClient, database_path: Path
+) -> None:
+    order = create_order(client, "T-UPSTREAM-CLAIM", mode="manual")
+    activate_manual(client, order)
+    slug = order["task_url"].split("/t/", 1)[1]
+    register_worker(client, "13900000012", "upstream-claim@example.com")
+    assignment_id = client.post(
+        f"/api/tasks/{slug}/claim", headers=WEB_HEADERS
+    ).json()["assignment"]["id"]
+
+    missing_header = client.put(
+        f"/api/assignments/{assignment_id}/silicon-account",
+        json={"account_id": "sfUser_ABC123"},
+    )
+    assert missing_header.status_code == 403
+
+    submitted = client.put(
+        f"/api/assignments/{assignment_id}/silicon-account",
+        headers=WEB_HEADERS,
+        json={"account_id": "sfUser_ABC123"},
+    )
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["upstream_claim"]["status"] == "PENDING"
+    assert submitted.json()["idempotent"] is False
+    repeated = client.put(
+        f"/api/assignments/{assignment_id}/silicon-account",
+        headers=WEB_HEADERS,
+        json={"account_id": "sfUser_ABC123"},
+    )
+    assert repeated.status_code == 200
+    assert repeated.json()["idempotent"] is True
+
+    with sqlite3.connect(database_path) as conn:
+        assignment = conn.execute(
+            "SELECT registered_at,verified_at FROM assignments WHERE id=?",
+            (assignment_id,),
+        ).fetchone()
+        assert assignment == (None, None)
+        assert conn.execute("SELECT COUNT(*) FROM rewards").fetchone()[0] == 0
+    assert b"sfUser_ABC123" not in database_path.read_bytes()
+
+    mismatch = client.post(
+        f"/api/admin/assignments/{assignment_id}/verify",
+        headers=ADMIN_HEADERS,
+        json={"upstream_account_id": "sfUser_DIFFERENT", "valid_authentication": True},
+    )
+    assert mismatch.status_code == 409
+    verified = client.post(
+        f"/api/admin/assignments/{assignment_id}/verify",
+        headers=ADMIN_HEADERS,
+        json={"upstream_account_id": "sfUser_ABC123", "valid_authentication": True},
+    )
+    assert verified.status_code == 200
+    assert verified.json()["assignment"]["status"] == "PAYOUT_PENDING"
+
+
+def test_other_worker_cannot_submit_account_for_assignment(client: TestClient) -> None:
+    order = create_order(client, "T-UPSTREAM-OWNER", mode="manual")
+    activate_manual(client, order)
+    slug = order["task_url"].split("/t/", 1)[1]
+    owner = TestClient(app)
+    other = TestClient(app)
+    try:
+        register_worker(owner, "13900000013", "owner@example.com")
+        assignment_id = owner.post(
+            f"/api/tasks/{slug}/claim", headers=WEB_HEADERS
+        ).json()["assignment"]["id"]
+        register_worker(other, "13900000014", "other@example.com")
+        response = other.put(
+            f"/api/assignments/{assignment_id}/silicon-account",
+            headers=WEB_HEADERS,
+            json={"account_id": "sfUser_OTHER123"},
+        )
+        assert response.status_code == 404
+    finally:
+        owner.close()
+        other.close()
+
+
+def test_refund_cannot_be_reactivated_or_reward_expired_claim(
+    client: TestClient, database_path: Path
+) -> None:
+    order = create_order(client, "T-REFUND-GUARD", mode="manual")
+    activate_manual(client, order)
+    slug = order["task_url"].split("/t/", 1)[1]
+    register_worker(client, "13900000015", "refund-guard@example.com")
+    assignment_id = client.post(
+        f"/api/tasks/{slug}/claim", headers=WEB_HEADERS
+    ).json()["assignment"]["id"]
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            "UPDATE assignments SET reservation_expires_at=? WHERE id=?",
+            (db.now_ts() - 1, assignment_id),
+        )
+        conn.commit()
+    assert client.get("/api/tasks").status_code == 200
+
+    refunded = client.post(
+        "/api/dev/taobao/events",
+        headers=ADMIN_HEADERS,
+        json={
+            "event_id": "TB-REFUND-GUARD",
+            "topic": "ORDER_REFUNDED",
+            "taobao_tid": "T-REFUND-GUARD",
+            "quantity": 1,
+        },
+    )
+    assert refunded.status_code == 200
+    customer_api = order["customer_url"].replace("/o/", "/api/customer/")
+    reactivated = client.post(
+        f"{customer_api}/manual-invitation",
+        headers=WEB_HEADERS,
+        json={"invitation": "WXYZ5678", "consent": True},
+    )
+    assert reactivated.status_code == 409
+    reviewed = client.post(
+        f"/api/admin/assignments/{assignment_id}/verify",
+        headers=ADMIN_HEADERS,
+        json={"upstream_account_id": "sfUser_REFUND123", "valid_authentication": True},
+    )
+    assert reviewed.status_code == 200
+    assert reviewed.json()["reward"] is None
+    with sqlite3.connect(database_path) as conn:
+        assert conn.execute("SELECT status FROM orders WHERE id=?", (order["id"],)).fetchone()[0] == "REFUNDED"
+        assert conn.execute("SELECT COUNT(*) FROM rewards").fetchone()[0] == 0
+
+
+def test_locked_assignment_cannot_be_downgraded(client: TestClient) -> None:
+    order = create_order(client, "T-NO-DOWNGRADE", mode="manual")
+    activate_manual(client, order)
+    slug = order["task_url"].split("/t/", 1)[1]
+    register_worker(client, "13900000016", "no-downgrade@example.com")
+    assignment_id = client.post(
+        f"/api/tasks/{slug}/claim", headers=WEB_HEADERS
+    ).json()["assignment"]["id"]
+    first = client.post(
+        f"/api/admin/assignments/{assignment_id}/verify",
+        headers=ADMIN_HEADERS,
+        json={"upstream_account_id": "sfUser_LOCKED123", "valid_authentication": True},
+    )
+    assert first.status_code == 200
+    rejected = client.post(
+        f"/api/admin/assignments/{assignment_id}/verify",
+        headers=ADMIN_HEADERS,
+        json={"upstream_account_id": "sfUser_LOCKED123", "valid_authentication": False},
+    )
+    assert rejected.status_code == 409
+    summary = client.get("/api/admin/summary", headers=ADMIN_HEADERS).json()
+    assert summary["orders"][0]["assignments"][0]["status"] == "PAYOUT_PENDING"
+    assert summary["rewards"][0]["status"] == "PAYOUT_PENDING"
+
+
+def test_remote_browser_handoff_disabled_has_no_side_effects(
+    client: TestClient, database_path: Path
+) -> None:
+    order = create_order(client, "T-HANDOFF-DISABLED", mode="live-disabled")
+    customer_api = order["customer_url"].replace("/o/", "/api/customer/")
+    response = client.post(
+        f"{customer_api}/silicon/handoffs",
+        headers=WEB_HEADERS,
+        json={"consent": True},
+    )
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "REMOTE_BROWSER_DISABLED"
+    with sqlite3.connect(database_path) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM silicon_browser_handoffs").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM consents").fetchone()[0] == 0
+
+
+def test_remote_browser_handoff_expires_at_exact_boundary(
+    client: TestClient, database_path: Path
+) -> None:
+    order = create_order(client, "T-HANDOFF-EXPIRY", mode="live-disabled")
+    current = db.now_ts()
+    with sqlite3.connect(database_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO silicon_browser_handoffs(
+                id,order_id,state,created_at,expires_at
+            ) VALUES(?,?,?,?,?)
+            """,
+            ("handoff_expiry", order["id"], "AWAITING_USER", current - 300, current),
+        )
+        conn.commit()
+
+    assert client.get("/api/tasks").status_code == 200
+    with sqlite3.connect(database_path) as conn:
+        state, failure_code = conn.execute(
+            "SELECT state,failure_code FROM silicon_browser_handoffs WHERE id='handoff_expiry'"
+        ).fetchone()
+    assert state == "EXPIRED"
+    assert failure_code == "HANDOFF_TIMEOUT"

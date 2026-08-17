@@ -31,6 +31,7 @@ def test_development_defaults_are_explicit() -> None:
     assert settings.admin_key == DEVELOPMENT_ADMIN_KEY
     assert settings.silicon_mode == "mock"
     assert settings.site_sms_mode == "mock"
+    assert settings.remote_browser_mode == "disabled"
     assert settings.development_site_otp == "135790"
     assert settings.seed_demo is True
 
@@ -77,6 +78,7 @@ def test_production_rejects_unsafe_configuration(
         ({"MVP_ENV": "staging"}, "MVP_ENV"),
         ({"MVP_SILICON_MODE": "live"}, "MVP_SILICON_MODE"),
         ({"MVP_SITE_SMS_MODE": "console"}, "MVP_SITE_SMS_MODE"),
+        ({"MVP_REMOTE_BROWSER_MODE": "external"}, "MVP_REMOTE_BROWSER_MODE"),
         ({"MVP_SEED_DEMO": "sometimes"}, "MVP_SEED_DEMO"),
         ({"MVP_DEV_SITE_OTP": "12345"}, "MVP_DEV_SITE_OTP"),
     ],

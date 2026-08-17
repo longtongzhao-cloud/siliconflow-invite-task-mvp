@@ -19,6 +19,8 @@
 - 管理员按淘宝订单号、`outer_sku_id` 和数量创建订单；`SF_INVITE_1/5/10` 映射到 1/5/10 人。
 - 客户订单链接、8 位邀请码/官方邀请链接手动录入，以及不联网的 mock 代理登录流程。
 - 本站手机号登录、支付宝收款信息登记、公开任务大厅、抢单、我的任务和站内通知。
+- 公开任务仅展示条件；邀请码和官方链接只在抢单成功后通过本人会话返回，不能绕过 N 人名额直接取得。
+- 抢单人可在手机打开官方邀请页并提交 SiliconFlow 用户 ID；ID 使用 AES-GCM 密文和 HMAC 保存，仅进入待核验状态，不直接发奖。
 - 30 分钟保护、15 分钟提醒、24 小时订单截止、超时补做和无候补规则。
 - 首次有效认证后创建 5 元奖励；待支付、支付重试和已支付均占用锁定容量；人工登记唯一支付流水号。
 - 淘宝 mock 付款事件幂等、全额退款/关闭处理；真实淘宝 webhook 默认返回禁用错误。
@@ -26,6 +28,8 @@
 - 手机号 HMAC 索引和掩码、支付宝及上游会话 AES-256-GCM 加密、会话最长 24 小时及过期/退款/关闭删除。
 - 集中式运行配置；生产启动会拒绝弱密钥、开发默认值、示例占位值、mock SiliconFlow、mock 本站短信和演示数据初始化。
 - 本站短信在开发模式可用固定演示码；生产环境未接入真实服务时统一返回 503，不会回退到固定验证码。
+- 手机安全登录已建立独立 broker、数据表、配置和 API 失败关闭边界；真实 Chromium/viewer 网关未配置时返回 503 且不写入会话。
+- 已修复退款/关闭订单可被客户接口重新激活、退款后超时记录仍可获奖、已锁奖励可被无效审核降级三个状态漏洞。
 
 ### 技术验证材料
 
@@ -43,6 +47,8 @@
 8. **当前存储只适合单机 MVP**：SQLite 用于本地验证；公网多实例或正式运营前迁移 PostgreSQL，并引入数据库迁移工具和备份恢复流程。
 9. **界面定位为运营工具**：客户页、任务页和管理台直接呈现业务状态；已验证桌面和 390px 移动端，无营销落地页。
 10. **生产配置失败关闭**：所有安全相关运行模式由集中配置校验；正式环境缺少强密钥或仍使用任何演示能力时在导入/启动阶段直接失败。真实短信未接通时宁可禁止登录，也不接受固定验证码。
+11. **用户声明不等于平台核验**：抢单人提交的 SiliconFlow 用户 ID 独立存储为 `PENDING` 声明，不改变 assignment 注册/认证状态；只有管理员或未来受信同步器才能锁定奖励。
+12. **远程浏览器独立编排**：异步真人接力不复用同步 SiliconFlow adapter，也不得在 SQLite 写事务内启动浏览器。当前 broker 只实现 `disabled`，避免未配置网关时误启用。
 
 ## 核心文件
 
@@ -50,18 +56,20 @@
 |---|---|
 | `mvp_app/main.py` | FastAPI 路由、认证、订单、抢单、奖励、人工支付、Taobao mock/webhook 安全开关 |
 | `mvp_app/config.py` | 环境变量集中解析、开发/生产默认值和生产启动安全校验 |
+| `mvp_app/browser_handoff.py` | 手机真人浏览器接力 broker 边界；当前仅提供失败关闭实现 |
 | `mvp_app/database.py` | SQLite schema、事务连接、提醒/过期扫描、容量统计、演示数据 |
 | `mvp_app/adapters.py` | SKU 映射、邀请码校验、SiliconFlow mock/manual/live-disabled 适配器 |
 | `mvp_app/security.py` | HMAC、AES-GCM、站内会话签名、数据掩码 |
 | `static/index.html` | 单页应用外壳和登录/支付宝对话框 |
 | `static/app.js` | 客户、抢单人和管理员端交互 |
 | `static/styles.css` | 桌面/移动响应式样式 |
-| `tests/test_mvp.py` / `tests/test_config.py` | 35 项配置、API、并发、安全和生命周期测试 |
+| `tests/conftest.py` / `tests/test_mvp.py` / `tests/test_config.py` | 43 项配置、API、权限、并发、安全和生命周期测试 |
 | `run.ps1` / `run-tests.ps1` | 本地启动和复验入口 |
 | `run.sh` / `run-tests.sh` / `smoke-test.sh` | Linux/macOS 启动、测试和服务健康检查入口 |
 | `requirements.txt` / `requirements-dev.txt` / `.env.example` / `.env.production.example` | 运行依赖、开发测试依赖和非敏感配置模板 |
 | `README.md` / `MVP-STAGE-REPORT.md` | 使用说明和阶段验收结论 |
 | `USER_GUIDE.md` | 管理员、客户和抢单人的当前 MVP 操作手册及生产边界 |
+| `REMOTE_BROWSER_GATEWAY.md` | 手机真人浏览器接力的状态机、接口、安全边界和启用门槛 |
 | `../tech-validation/validation-report.md` | 外部协议、风险和 Go/No-Go 总结 |
 | `../README.md` / `../DEPENDENCIES.md` | GitHub 仓库入口和依赖边界 |
 | `../CONTRIBUTING.md` / `../SECURITY.md` | 协作流程和安全要求 |
@@ -78,7 +86,7 @@ cd outputs\mvp
 powershell -ExecutionPolicy Bypass -File .\run-tests.ps1
 ```
 
-Windows PowerShell 最新结果：`35 passed in 7.92s`，无测试警告。覆盖：
+Windows PowerShell 最新结果：`43 passed in 9.04s`，无测试警告。覆盖：
 
 - mock 代理登录、会话密文检查、邀请码返回、抢单、认证、奖励和支付完整闭环；
 - SKU 1/5/10 映射；登录和支付宝前置条件；
@@ -88,6 +96,8 @@ Windows PowerShell 最新结果：`35 passed in 7.92s`，无测试警告。覆�
 - 淘宝 mock 付款幂等、退款关闭、真实 webhook 失败关闭；
 - SiliconFlow 真实适配器失败关闭；
 - 开发/生产配置解析、生产弱值和占位值拒绝、mock/演示能力拒绝、本站短信禁用失败关闭。
+- 公开邀请码隔离、抢单本人 ID 密文声明、跨用户对象权限、管理员复核一致性；
+- 退款订单不可复活或新增奖励、已锁奖励不可被降级、远程浏览器禁用零副作用。
 
 同日执行 `../tech-validation/run-validation.ps1`：
 
@@ -100,12 +110,12 @@ Windows PowerShell 最新结果：`35 passed in 7.92s`，无测试警告。覆�
 2026-08-17 在 WSL2 Ubuntu 24.04.1 上重新执行原生 Linux 复验：
 
 - Linux Python 3.12.3，虚拟环境解释器解析到 `/usr/bin/python3.12`；
-- `./run-tests.sh`：`35 passed in 9.16s`；
-- `./smoke-test.sh`：Uvicorn 启动成功，`/api/health` 返回 200，并明确报告 `site_sms_mode=mock`；
+- `./run-tests.sh`：`43 passed in 11.31s`；
+- `./smoke-test.sh`：Uvicorn 启动成功，`/api/health` 返回 200，并明确报告 `site_sms_mode=mock`、`remote_browser_mode=disabled`；
 - PowerShell 7.6.5 下完整技术验证通过：只读端点 23、业务规则 5/5、并发 6/6、会话安全 8/8、敏感输出扫描通过；
 - Linux 虚拟环境 `pip check` 无依赖冲突，`pip-audit` 未发现已知漏洞。
 
-此前浏览器验收已覆盖任务大厅、客户代理登录 mock、抢单、认证、管理台、桌面和 390px 移动端；无横向溢出，控制台 0 个错误/警告。本次核对时本地服务未运行，使用 `run.ps1` 启动。
+本次浏览器验收覆盖 390×844 手机和 1440×900 桌面：未抢单邀请码不可见，登录/支付宝/抢单后官方链接出现，用户 ID 提交后只显示掩码和待核验；按钮最小高度 44px，无横向溢出，控制台 0 个错误/警告。本地服务运行于 `http://127.0.0.1:8765`。
 
 ## Git 状态
 
@@ -141,6 +151,7 @@ Windows PowerShell 最新结果：`35 passed in 7.92s`，无测试警告。覆�
 - 尚无公网域名、HTTPS 服务器、生产数据库、KMS、管理员 MFA、备份恢复和监控告警。
 - 候选域名未购买；`gjlt.com` 已被注册，其他候选在购买前必须重新查询实时状态和商标/混淆风险。
 - 本站真实短信仍未接通。固定演示验证码只允许开发模式；生产模式已失败关闭。普通阿里云短信签名需要企业资质；个人主体可评估阿里云号码认证服务的“短信认证”产品。
+- 手机安全登录真实网关尚未实现：缺 Chromium 容器编排、一次性 viewer、WebRTC/noVNC、5 分钟销毁、断线重连和受信结果回调；`MVP_REMOTE_BROWSER_MODE` 必须保持 `disabled`。
 - 支付宝仅登记收款信息，未验证账户归属；尚未执行真实 5 元转账或对账。
 - 生产配置启动校验和 Secure Cookie 已实现，但管理员仍只有单一静态密钥，没有 MFA/RBAC；密钥也尚未接入 KMS，不能直接公网运营。
 
@@ -162,7 +173,7 @@ Windows PowerShell 最新结果：`35 passed in 7.92s`，无测试警告。覆�
 4. **接入本站真实短信**：优先验证阿里云号码认证服务的短信认证；将固定演示验证码替换为发送/核验 API、限流和回执处理。
 5. **生产化基础设施**：生产配置失败关闭已完成；后续将 SQLite 迁移 PostgreSQL，引入 schema migration、KMS/密钥轮换、管理员 MFA/RBAC、审计、备份恢复、错误监控和一键冻结开关。
 6. **淘宝接入（满足权限后）**：完成 OAuth、店铺主账号授权、`trade.fullinfo.get` 最小字段读取、付款/关闭/退款消息验签与幂等；先保留人工链接发送，再单独申请卡片/聊天能力。
-7. **SiliconFlow 受控 live 验证**：使用专用邀请人账号，由账号本人解决 CAPTCHA 并输入 OTP；实现会话 Vault、字段 schema 校验、401/403/429/5xx 熔断和人工回退；禁止验证码/令牌日志。
+7. **手机真人接力网关**：具备 HTTPS 服务器后实现隔离 Chromium、一次性 viewer、5 分钟空闲销毁、断线重连、受信回调验签和清理重试；账号本人解决 CAPTCHA 并输入 OTP，禁止验证码/令牌日志。取得 SiliconFlow 许可前保持失败关闭。
 8. **真人三阶段验收**：使用一个全新用户依次验证注册前、注册未实名、首次有效实名；人工对照官方邀请记录，测量状态延迟。无法获得重复/无效样本时保持人工判奖。
 9. **支付与争议闭环**：执行一笔受控 5 元人工转账，验证流水幂等、支付失败不释放容量、隐私遮罩、对账和申诉处理。
 10. **上线门复测**：重跑全部 P0 并发、安全、删除、外部失败和浏览器测试；真实写接口、真实支付与用户数据测试必须单独留存脱敏证据。

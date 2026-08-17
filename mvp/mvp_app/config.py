@@ -23,6 +23,7 @@ class Settings:
     admin_key: str
     silicon_mode: str
     site_sms_mode: str
+    remote_browser_mode: str
     development_site_otp: str | None
     seed_demo: bool
 
@@ -58,6 +59,12 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     ).strip().lower()
     if site_sms_mode not in {"mock", "disabled"}:
         raise ConfigurationError("MVP_SITE_SMS_MODE must be mock or disabled")
+
+    remote_browser_mode = values.get("MVP_REMOTE_BROWSER_MODE", "disabled").strip().lower()
+    if remote_browser_mode != "disabled":
+        raise ConfigurationError(
+            "MVP_REMOTE_BROWSER_MODE must remain disabled until a trusted gateway is configured"
+        )
 
     secret = values.get("MVP_SECRET", DEVELOPMENT_SECRET if is_development else "")
     admin_key = values.get(
@@ -104,6 +111,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         admin_key=admin_key,
         silicon_mode=silicon_mode,
         site_sms_mode=site_sms_mode,
+        remote_browser_mode=remote_browser_mode,
         development_site_otp=development_site_otp,
         seed_demo=seed_demo,
     )

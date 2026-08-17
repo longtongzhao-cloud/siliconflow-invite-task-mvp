@@ -127,6 +127,37 @@ def init_schema() -> None:
             UNIQUE(order_id, user_id)
         );
         CREATE INDEX IF NOT EXISTS idx_assignments_order_status ON assignments(order_id, status);
+        CREATE TABLE IF NOT EXISTS assignment_upstream_claims (
+            assignment_id TEXT PRIMARY KEY REFERENCES assignments(id),
+            account_id_cipher TEXT NOT NULL,
+            upstream_user_key TEXT NOT NULL,
+            account_id_mask TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('PENDING','CONFIRMED','REJECTED')),
+            submitted_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            reviewed_at INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS silicon_browser_handoffs (
+            id TEXT PRIMARY KEY,
+            order_id TEXT NOT NULL REFERENCES orders(id),
+            consent_id TEXT REFERENCES consents(id),
+            actor_ref TEXT,
+            state TEXT NOT NULL CHECK(state IN (
+                'STARTING','AWAITING_USER','PROCESSING','COMPLETED',
+                'FAILED','CANCELLED','EXPIRED'
+            )),
+            provider_session_ref TEXT,
+            viewer_token_hash TEXT,
+            viewer_token_used_at INTEGER,
+            failure_code TEXT,
+            created_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL,
+            terminal_at INTEGER,
+            CHECK(expires_at <= created_at + 300)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_handoff_active_order
+        ON silicon_browser_handoffs(order_id)
+        WHERE state IN ('STARTING','AWAITING_USER','PROCESSING');
         CREATE TABLE IF NOT EXISTS rewards (
             id TEXT PRIMARY KEY,
             order_id TEXT NOT NULL REFERENCES orders(id),
@@ -181,6 +212,14 @@ LOCKED_STATUSES = ("VERIFIED_LOCKED", "PAYOUT_PENDING", "PAYOUT_RETRY", "PAID")
 
 def sweep(conn: sqlite3.Connection, now: int | None = None) -> None:
     current = now or now_ts()
+    conn.execute(
+        """
+        UPDATE silicon_browser_handoffs
+        SET state='EXPIRED',terminal_at=?,failure_code='HANDOFF_TIMEOUT'
+        WHERE state IN ('STARTING','AWAITING_USER','PROCESSING') AND expires_at<=?
+        """,
+        (current, current),
+    )
     reminders = conn.execute(
         """
         SELECT a.id, a.user_id
@@ -235,6 +274,15 @@ def sweep(conn: sqlite3.Connection, now: int | None = None) -> None:
     conn.execute(
         "UPDATE orders SET status='CLOSED', updated_at=? WHERE expires_at<=? AND status IN ('ACTIVE','AWAITING_INVITE')",
         (current, current),
+    )
+    conn.execute(
+        """
+        UPDATE silicon_browser_handoffs
+        SET state='CANCELLED',terminal_at=?,failure_code='ORDER_ENDED'
+        WHERE state IN ('STARTING','AWAITING_USER','PROCESSING')
+          AND order_id IN (SELECT id FROM orders WHERE status IN ('CLOSED','REFUNDED'))
+        """,
+        (current,),
     )
     conn.execute(
         """

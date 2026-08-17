@@ -23,6 +23,9 @@ const statusLabels = {
   PAYOUT_RETRY: "支付待处理",
   PAID: "已支付",
   ORDER_EXPIRED: "订单已结束",
+  PENDING: "待核验",
+  CONFIRMED: "已核验",
+  REJECTED: "核验未通过",
   AWAITING_INVITE: "待填写邀请码",
   CLOSED: "已关闭",
 };
@@ -59,9 +62,9 @@ function formatRemaining(seconds) {
 }
 
 function statusClass(status) {
-  if (["PAID", "PAYOUT_PENDING", "VERIFIED_LOCKED"].includes(status)) return "green";
-  if (["ACTIVE", "EXPIRED", "AWAITING_INVITE"].includes(status)) return "amber";
-  if (["CLOSED", "ORDER_EXPIRED", "VERIFIED_NO_REWARD"].includes(status)) return "red";
+  if (["PAID", "PAYOUT_PENDING", "VERIFIED_LOCKED", "CONFIRMED"].includes(status)) return "green";
+  if (["ACTIVE", "EXPIRED", "AWAITING_INVITE", "PENDING"].includes(status)) return "amber";
+  if (["CLOSED", "ORDER_EXPIRED", "VERIFIED_NO_REWARD", "REJECTED"].includes(status)) return "red";
   return "";
 }
 
@@ -111,8 +114,21 @@ function setNavVisible(visible) {
   mainNav.style.display = visible ? "" : "none";
 }
 
-function copyText(value) {
-  navigator.clipboard.writeText(value).then(() => toast("已复制"));
+async function copyText(value) {
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch (_) {
+    const input = document.createElement("textarea");
+    input.value = value;
+    input.setAttribute("readonly", "");
+    input.style.position = "fixed";
+    input.style.opacity = "0";
+    document.body.appendChild(input);
+    input.select();
+    document.execCommand("copy");
+    input.remove();
+  }
+  toast("已复制");
 }
 
 function bindCopyButtons() {
@@ -185,7 +201,7 @@ async function renderTasks() {
       <div class="section-head"><h2>可领取任务</h2><p>名额以服务器实时结果为准</p></div>
       ${total ? `<div class="task-list">${data.tasks.map((task) => `
         <div class="task-row">
-          <div class="task-name"><strong>SiliconFlow 新用户认证</strong><span>邀请码 ${escapeHtml(task.invitation_code)}</span></div>
+          <div class="task-name"><strong>SiliconFlow 新用户认证</strong><span>领取后显示专属邀请链接</span></div>
           <div><span class="cell-label">目标</span><span class="cell-value">${task.target} 人</span></div>
           <div><span class="cell-label">已完成</span><span class="cell-value">${task.counts.locked} 人</span></div>
           <div><span class="cell-label">保护中</span><span class="cell-value">${task.counts.active} 人</span></div>
@@ -287,8 +303,8 @@ async function renderAdmin() {
             <span class="status ${statusClass(order.status)}">${orderStatusLabels[order.status] || order.status}</span>
           </div>
           <p>已完成 ${order.counts.locked} · 保护中 ${order.counts.active} · 剩余 ${order.available}</p>
-          ${order.assignments.length ? `<table class="assignment-table"><thead><tr><th>用户</th><th>状态</th><th>注册</th><th>奖励</th><th>操作</th></tr></thead><tbody>${order.assignments.map((item) => `
-            <tr><td>${escapeHtml(item.phone_mask)}</td><td>${statusLabels[item.status] || item.status}</td><td>${item.registered_at ? "已注册" : "待注册"}</td><td>${item.reward_status ? statusLabels[item.reward_status] || item.reward_status : "-"}</td><td>${["ACTIVE", "EXPIRED"].includes(item.status) ? `<button class="button secondary admin-verify" data-id="${item.id}">人工确认</button>` : "-"}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">暂无抢单记录</p>`}
+          ${order.assignments.length ? `<table class="assignment-table"><thead><tr><th>用户</th><th>状态</th><th>SF ID</th><th>注册</th><th>奖励</th><th>操作</th></tr></thead><tbody>${order.assignments.map((item) => `
+            <tr><td>${escapeHtml(item.phone_mask)}</td><td>${statusLabels[item.status] || item.status}</td><td>${item.upstream_claim ? `${escapeHtml(item.upstream_claim.account_id_mask)} · ${escapeHtml(item.upstream_claim.status)}` : "未提交"}</td><td>${item.registered_at ? "已注册" : "待注册"}</td><td>${item.reward_status ? statusLabels[item.reward_status] || item.reward_status : "-"}</td><td>${["ACTIVE", "EXPIRED"].includes(item.status) ? `<button class="button secondary admin-verify" data-id="${item.id}" data-mask="${escapeHtml(item.upstream_claim?.account_id_mask || "")}">人工确认</button>` : "-"}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">暂无抢单记录</p>`}
         </div>`).join("")}</div>
     </section>
     <section class="section">
@@ -301,7 +317,7 @@ async function renderAdmin() {
     </section>`;
 
   document.querySelector("#orderForm").addEventListener("submit", createAdminOrder);
-  document.querySelectorAll(".admin-verify").forEach((button) => button.addEventListener("click", () => adminVerify(button.dataset.id)));
+  document.querySelectorAll(".admin-verify").forEach((button) => button.addEventListener("click", () => adminVerify(button.dataset.id, button.dataset.mask)));
   document.querySelectorAll(".pay-reward").forEach((button) => button.addEventListener("click", () => payReward(button.dataset.id)));
 }
 
@@ -332,8 +348,9 @@ async function createAdminOrder(event) {
   }
 }
 
-async function adminVerify(assignmentId) {
-  const upstream = prompt("请输入 SiliconFlow 账号 ID（仅用于去重）");
+async function adminVerify(assignmentId, submittedMask = "") {
+  const hint = submittedMask ? `，抢单人提交值为 ${submittedMask}` : "";
+  const upstream = prompt(`请输入从官方邀请记录核实的 SiliconFlow 用户 ID${hint}`);
   if (!upstream) return;
   try {
     await apiAdmin(`/api/admin/assignments/${assignmentId}/verify`, {
@@ -378,15 +395,20 @@ async function renderCustomer(rawToken) {
           <dl class="key-value"><dt>8 位邀请码</dt><dd>${escapeHtml(order.invitation_code)}</dd><dt>邀请链接</dt><dd>${escapeHtml(order.invitation_url)}</dd><dt>任务链接</dt><dd>${escapeHtml(taskUrl)}</dd></dl>
           <div class="button-row"><button class="button primary" data-copy="${escapeHtml(taskUrl)}">复制任务链接</button><a class="button secondary" href="${order.task_url}">打开任务页</a></div>
         </div>` : `<div class="panel">
-          <div class="tabs"><button id="proxyTab" class="active">代理登录获取</button><button id="manualTab">手动填写</button></div>
+          <div class="tabs" role="tablist"><button id="proxyTab" class="active" role="tab" aria-selected="true" aria-controls="proxyPane">手机安全登录</button><button id="manualTab" role="tab" aria-selected="false" aria-controls="manualPane">手动填写</button></div>
           <div id="proxyPane">
-            ${order.adapter.proxy_login ? `<form id="proxyForm" class="form-stack">
+            <form id="handoffForm" class="form-stack">
+              <label class="checkbox"><input id="handoffConsent" type="checkbox" required><span>我授权本站启动一次性浏览器会话并读取邀请码；该授权不代表 SiliconFlow 官方接入许可。</span></label>
+              <button class="button primary" type="submit" ${order.browser_handoff?.enabled ? "" : "disabled"}>开始手机安全登录</button>
+              <p id="handoffStatus" class="form-hint" role="status">${order.browser_handoff?.enabled ? "会话最长保留 5 分钟未操作时间" : "远程浏览器网关尚未配置，请使用手动填写"}</p>
+            </form>
+            ${order.adapter.proxy_login ? `<div class="development-block"><p class="eyebrow">本地开发演示</p><form id="proxyForm" class="form-stack">
               <label>SiliconFlow 注册手机号<input id="sfPhone" type="tel" inputmode="numeric" required placeholder="请输入邀请人手机号"></label>
               <div class="code-row"><label>SiliconFlow 验证码<input id="sfOtp" inputmode="numeric" maxlength="6" required placeholder="6 位验证码"></label><button id="sendSfCode" type="button" class="button secondary">获取验证码</button></div>
               <p id="sfCodeHint" class="form-hint"></p>
               <label class="checkbox"><input id="sfConsent" type="checkbox" required><span>我授权本站代为提交登录信息、读取邀请码，并将会话令牌加密保存最长 24 小时。</span></label>
               <button class="button primary" type="submit">获取邀请码</button>
-            </form>` : `<div class="notice warning">当前订单未启用代理登录适配器，请改用手动填写。</div>`}
+            </form></div>` : ""}
           </div>
           <div id="manualPane" hidden>
             <form id="manualForm" class="form-stack">
@@ -411,11 +433,26 @@ function bindCustomerForms(rawToken, order) {
   const manualPane = document.querySelector("#manualPane");
   document.querySelector("#proxyTab").addEventListener("click", (event) => {
     event.currentTarget.classList.add("active"); document.querySelector("#manualTab").classList.remove("active");
+    event.currentTarget.setAttribute("aria-selected", "true"); document.querySelector("#manualTab").setAttribute("aria-selected", "false");
     proxyPane.hidden = false; manualPane.hidden = true;
   });
   document.querySelector("#manualTab").addEventListener("click", (event) => {
     event.currentTarget.classList.add("active"); document.querySelector("#proxyTab").classList.remove("active");
+    event.currentTarget.setAttribute("aria-selected", "true"); document.querySelector("#proxyTab").setAttribute("aria-selected", "false");
     proxyPane.hidden = true; manualPane.hidden = false;
+  });
+  document.querySelector("#handoffForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const status = document.querySelector("#handoffStatus");
+    try {
+      status.textContent = "正在创建安全会话...";
+      const data = await api(`/api/customer/${encodeURIComponent(rawToken)}/silicon/handoffs`, {
+        method: "POST", body: { consent: document.querySelector("#handoffConsent").checked },
+      });
+      location.assign(data.viewer_url);
+    } catch (error) {
+      status.textContent = error.message;
+    }
   });
   document.querySelector("#sendSfCode")?.addEventListener("click", async () => {
     try {
@@ -476,7 +513,7 @@ async function renderTask(slug) {
       <div class="detail-main">
         <div class="panel">
           <h2>任务要求</h2>
-          <dl class="key-value"><dt>邀请链接</dt><dd><a href="${escapeHtml(task.invitation_url)}" target="_blank" rel="noreferrer">${escapeHtml(task.invitation_url)}</a></dd><dt>邀请码</dt><dd>${escapeHtml(task.invitation_code)}</dd><dt>完成条件</dt><dd>新用户注册 + 填写邀请码 + 首次有效实名认证</dd><dt>任务截止</dt><dd>${formatTime(task.expires_at)}</dd></dl>
+          <dl class="key-value"><dt>邀请信息</dt><dd>抢单成功后向本人显示</dd><dt>完成条件</dt><dd>新用户注册 + 填写邀请码 + 首次有效实名认证</dd><dt>任务截止</dt><dd>${formatTime(task.expires_at)}</dd></dl>
         </div>
         <div class="panel">
           <h2>我的进度</h2>
@@ -489,6 +526,7 @@ async function renderTask(slug) {
       </aside>
     </div>`;
   document.querySelector("#claimTask")?.addEventListener("click", () => claimAfterAccount(slug));
+  bindCopyButtons();
   if (assignment) bindAssignmentActions(assignment, slug);
 }
 
@@ -499,6 +537,12 @@ function assignmentPanel(item) {
     <div class="button-row"><span class="status ${statusClass(item.status)}">${statusLabels[item.status] || item.status}</span>${item.reward_status ? `<span class="status ${statusClass(item.reward_status)}">奖励：${statusLabels[item.reward_status] || item.reward_status}</span>` : ""}</div>
     ${active ? `<h3>保护期剩余</h3><div id="countdown" class="countdown" data-expires="${item.reservation_expires_at}">${formatRemaining(item.reservation_expires_at - Date.now() / 1000)}</div>` : ""}
     <dl class="key-value"><dt>领取时间</dt><dd>${formatTime(item.claimed_at)}</dd><dt>注册状态</dt><dd>${item.registered_at ? "已登记完成" : "待完成"}</dd><dt>认证状态</dt><dd>${item.verified_at ? "已确认" : "待确认"}</dd></dl>
+    ${canComplete && item.invitation_url ? `<div class="official-actions"><a class="button primary" href="${escapeHtml(item.invitation_url)}" target="_blank" rel="noopener noreferrer">前往 SiliconFlow 注册</a><button type="button" class="button secondary" data-copy="${escapeHtml(item.invitation_url)}">复制邀请链接</button></div>` : ""}
+    ${canComplete ? `<form id="siliconAccountForm" class="form-stack upstream-form">
+      <label>SiliconFlow 用户 ID<input id="siliconAccountId" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="128" required placeholder="完成后填写用户 ID"></label>
+      <button class="button secondary" type="submit">${item.upstream_claim ? "更新并等待核验" : "提交并等待核验"}</button>
+      <p id="upstreamClaimStatus" class="form-hint" role="status">${item.upstream_claim ? `已提交 ${escapeHtml(item.upstream_claim.account_id_mask)} · ${item.upstream_claim.status === "PENDING" ? "等待核验" : statusLabels[item.upstream_claim.status] || item.upstream_claim.status}` : "提交不会直接认定注册或认证成功"}</p>
+    </form>` : ""}
     ${canComplete && state.health?.environment === "development" ? `<div class="button-row"><button id="mockRegister" class="button secondary">模拟完成注册</button><button id="mockVerify" class="button primary">模拟完成有效认证</button></div>` : ""}
     ${item.status === "EXPIRED" ? `<div class="notice warning">30 分钟保护期已结束。订单未满且仍在 24 小时内时，补做成功仍可锁定奖励。</div>` : ""}`;
 }
@@ -515,6 +559,20 @@ function bindAssignmentActions(item, slug) {
       }
     }, 1000);
   }
+  document.querySelector("#siliconAccountForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const status = document.querySelector("#upstreamClaimStatus");
+    try {
+      status.textContent = "正在提交...";
+      await api(`/api/assignments/${item.id}/silicon-account`, {
+        method: "PUT", body: { account_id: document.querySelector("#siliconAccountId").value },
+      });
+      toast("用户 ID 已提交，等待核验");
+      await renderTask(slug);
+    } catch (error) {
+      status.textContent = error.message;
+    }
+  });
   document.querySelector("#mockRegister")?.addEventListener("click", async () => {
     try { await api(`/api/assignments/${item.id}/mock-register`, { method: "POST" }); toast("注册状态已更新"); await renderTask(slug); }
     catch (error) { toast(error.message); }

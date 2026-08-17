@@ -142,7 +142,7 @@ a { color: inherit; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 38px;
+  min-height: 44px;
   padding: 0 16px;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -213,6 +213,9 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px 
 .checkbox input { width: 18px; min-height: 18px; margin-top: 2px; }
 .code-row { display: grid; grid-template-columns: minmax(0, 1fr) 116px; gap: 10px; align-items: end; }
 .form-hint { min-height: 20px; margin: 0; color: var(--muted); font-size: 12px; }
+.development-block { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
+.official-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+.upstream-form { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
 
 .tabs { display: flex; gap: 4px; margin-bottom: 18px; border-bottom: 1px solid var(--line); }
 .tabs button { padding: 10px 14px; color: var(--muted); background: transparent; border: 0; border-bottom: 2px solid transparent; }
@@ -260,6 +263,8 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px 
   .page-head { align-items: start; flex-direction: column; }
   .page-head h1, .detail-title h1 { font-size: 22px; }
   .form-grid { grid-template-columns: 1fr; }
+  .code-row { grid-template-columns: 1fr; }
+  .official-actions { display: grid; grid-template-columns: 1fr; }
   .panel { padding: 17px; }
   .task-row { grid-template-columns: minmax(0, 1fr) 64px 82px; padding: 12px; }
   .task-row > :nth-child(3) { display: none; }

@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from . import database as db
 from .adapters import AdapterError, adapter_result, get_silicon_adapter, parse_invitation, target_people
+from .browser_handoff import get_browser_handoff_broker
 from .config import SETTINGS
 from .security import (
     decrypt_text,
@@ -81,6 +82,14 @@ class SiliconLogin(BaseModel):
 class ManualInvite(BaseModel):
     invitation: str
     consent: bool
+
+
+class BrowserHandoffStart(BaseModel):
+    consent: bool
+
+
+class SiliconAccountClaim(BaseModel):
+    account_id: str = Field(min_length=3, max_length=128)
 
 
 class ManualVerify(BaseModel):
@@ -172,7 +181,17 @@ def get_order_by_customer_token(conn: sqlite3.Connection, raw_token: str) -> sql
     return order
 
 
-def order_payload(conn: sqlite3.Connection, order: sqlite3.Row, include_tid: bool = False) -> dict[str, Any]:
+def require_mutable_customer_order(order: sqlite3.Row) -> None:
+    if order["status"] not in {"AWAITING_INVITE", "ACTIVE"}:
+        raise HTTPException(409, "订单已关闭，不能修改邀请信息")
+
+
+def order_payload(
+    conn: sqlite3.Connection,
+    order: sqlite3.Row,
+    include_tid: bool = False,
+    include_invitation: bool = False,
+) -> dict[str, Any]:
     counts = db.metrics(conn, order["id"])
     occupied = counts["active"] + counts["locked"]
     data = {
@@ -182,14 +201,17 @@ def order_payload(conn: sqlite3.Connection, order: sqlite3.Row, include_tid: boo
         "target": order["target_n"],
         "status": order["status"],
         "expires_at": order["expires_at"],
-        "invitation_code": order["invitation_code"],
-        "invitation_url": order["invitation_url"],
-        "invitation_source": order["invitation_source"],
         "silicon_mode": order["silicon_mode"],
         "task_url": f"/t/{order['public_slug']}",
         "counts": counts,
         "available": max(0, order["target_n"] - occupied),
     }
+    if include_invitation:
+        data.update(
+            invitation_code=order["invitation_code"],
+            invitation_url=order["invitation_url"],
+            invitation_source=order["invitation_source"],
+        )
     if include_tid:
         data["taobao_tid"] = order["taobao_tid"]
     return data
@@ -205,6 +227,31 @@ def audit(conn: sqlite3.Connection, actor_type: str, actor_id: str | None, actio
         (db.new_id("evt"), actor_type, actor_id, action, object_type, object_id,
          json.dumps(metadata or {}, separators=(",", ":")), db.now_ts()),
     )
+
+
+def normalize_upstream_account_id(value: str) -> str:
+    normalized = value.strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{3,128}", normalized):
+        raise HTTPException(400, "SiliconFlow 用户 ID 格式不正确")
+    return normalized
+
+
+def mask_upstream_account_id(value: str) -> str:
+    if len(value) <= 6:
+        return value[:1] + "***" + value[-1:]
+    return value[:3] + "***" + value[-3:]
+
+
+def upstream_claim_payload(row: sqlite3.Row | None) -> dict[str, Any] | None:
+    if not row or row["claim_status"] is None:
+        return None
+    return {
+        "status": row["claim_status"],
+        "account_id_mask": row["account_id_mask"],
+        "submitted_at": row["submitted_at"],
+        "updated_at": row["claim_updated_at"],
+        "reviewed_at": row["reviewed_at"],
+    }
 
 
 def insert_order(
@@ -240,6 +287,7 @@ def health() -> dict[str, Any]:
         "environment": ENV,
         "silicon_default_mode": DEFAULT_SILICON_MODE,
         "site_sms_mode": SETTINGS.site_sms_mode,
+        "remote_browser_mode": SETTINGS.remote_browser_mode,
         "real_upstream_writes_enabled": False,
     }
 
@@ -363,7 +411,7 @@ def create_order(body: OrderCreate, x_admin_key: str | None = Header(default=Non
             )
             audit(conn, "ADMIN", "admin", "CREATE_ORDER", "ORDER", order["id"],
                   {"sku": body.outer_sku_id, "quantity": body.quantity, "target": order["target_n"], "mode": mode})
-            payload = order_payload(conn, order, include_tid=True)
+            payload = order_payload(conn, order, include_tid=True, include_invitation=True)
     except sqlite3.IntegrityError as exc:
         raise HTTPException(409, "淘宝订单号已存在") from exc
     payload["customer_url"] = f"/o/{customer_token}"
@@ -395,7 +443,12 @@ def taobao_mock_event(body: TaobaoMockEvent, x_admin_key: str | None = Header(de
                 if prior["payload_hash"] != payload_fingerprint:
                     raise HTTPException(409, "同一事件 ID 的载荷不一致")
                 order = conn.execute("SELECT * FROM orders WHERE taobao_tid=?", (body.taobao_tid,)).fetchone()
-                return {"idempotent": True, "order": order_payload(conn, order, include_tid=True) if order else None}
+                return {
+                    "idempotent": True,
+                    "order": order_payload(
+                        conn, order, include_tid=True, include_invitation=True
+                    ) if order else None,
+                }
 
             customer_token = None
             order = conn.execute("SELECT * FROM orders WHERE taobao_tid=?", (body.taobao_tid,)).fetchone()
@@ -410,10 +463,21 @@ def taobao_mock_event(body: TaobaoMockEvent, x_admin_key: str | None = Header(de
                 next_status = "REFUNDED" if body.topic == "ORDER_REFUNDED" else "CLOSED"
                 conn.execute("UPDATE orders SET status=?, updated_at=? WHERE id=?", (next_status, current, order["id"]))
                 conn.execute(
-                    "UPDATE assignments SET status='ORDER_EXPIRED', updated_at=? WHERE order_id=? AND status='ACTIVE'",
+                    """
+                    UPDATE assignments SET status='ORDER_EXPIRED', updated_at=?
+                    WHERE order_id=? AND status IN ('ACTIVE','EXPIRED')
+                    """,
                     (current, order["id"]),
                 )
                 conn.execute("DELETE FROM silicon_sessions WHERE order_id=?", (order["id"],))
+                conn.execute(
+                    """
+                    UPDATE silicon_browser_handoffs
+                    SET state='CANCELLED',terminal_at=?,failure_code='ORDER_ENDED'
+                    WHERE order_id=? AND state IN ('STARTING','AWAITING_USER','PROCESSING')
+                    """,
+                    (current, order["id"]),
+                )
                 order = conn.execute("SELECT * FROM orders WHERE id=?", (order["id"],)).fetchone()
 
             conn.execute(
@@ -421,7 +485,12 @@ def taobao_mock_event(body: TaobaoMockEvent, x_admin_key: str | None = Header(de
                 (body.event_id, body.topic, body.taobao_tid, payload_fingerprint, current),
             )
             audit(conn, "TAOBAO_MOCK", body.event_id, body.topic, "ORDER", order["id"] if order else None)
-            response = {"idempotent": False, "order": order_payload(conn, order, include_tid=True) if order else None}
+            response = {
+                "idempotent": False,
+                "order": order_payload(
+                    conn, order, include_tid=True, include_invitation=True
+                ) if order else None,
+            }
             if customer_token and order:
                 response["customer_url"] = f"/o/{customer_token}"
                 response["delivery_mode"] = "MANUAL_REQUIRED"
@@ -434,16 +503,45 @@ def taobao_mock_event(body: TaobaoMockEvent, x_admin_key: str | None = Header(de
 def customer_order(raw_token: str) -> dict[str, Any]:
     with db.connect(immediate=True) as conn:
         order = get_order_by_customer_token(conn, raw_token)
-        payload = order_payload(conn, order, include_tid=True)
+        payload = order_payload(
+            conn, order, include_tid=True, include_invitation=True
+        )
         payload["adapter"] = get_silicon_adapter(order["silicon_mode"]).capabilities()
+        handoff = get_browser_handoff_broker(SETTINGS.remote_browser_mode).capabilities()
+        payload["browser_handoff"] = {
+            "enabled": handoff.enabled,
+            "mode": handoff.mode,
+            "session_ttl_seconds": handoff.session_ttl_seconds,
+        }
         return payload
 
 
+@app.post("/api/customer/{raw_token}/silicon/handoffs")
+def start_customer_browser_handoff(
+    raw_token: str, body: BrowserHandoffStart, request: Request
+) -> dict[str, Any]:
+    require_web_request(request)
+    if not body.consent:
+        raise HTTPException(400, "请先确认授权范围")
+    with db.connect(immediate=True) as conn:
+        order = get_order_by_customer_token(conn, raw_token)
+        require_mutable_customer_order(order)
+
+    # A real broker must be called outside the SQLite write transaction.
+    broker = get_browser_handoff_broker(SETTINGS.remote_browser_mode)
+    broker.start()
+    raise RuntimeError("browser handoff broker returned without a session")
+
+
 @app.post("/api/customer/{raw_token}/silicon/send-code")
-def customer_silicon_send(raw_token: str, body: PhoneRequest) -> dict[str, Any]:
+def customer_silicon_send(
+    raw_token: str, body: PhoneRequest, request: Request
+) -> dict[str, Any]:
+    require_web_request(request)
     phone = normalize_phone(body.phone)
     with db.connect(immediate=True) as conn:
         order = get_order_by_customer_token(conn, raw_token)
+        require_mutable_customer_order(order)
         adapter = get_silicon_adapter(order["silicon_mode"])
         result = adapter.send_otp(phone)
         audit(conn, "CUSTOMER", hmac_hex(phone, "phone-index"), "SILICON_OTP_REQUEST", "ORDER", order["id"],
@@ -452,13 +550,17 @@ def customer_silicon_send(raw_token: str, body: PhoneRequest) -> dict[str, Any]:
 
 
 @app.post("/api/customer/{raw_token}/silicon/login")
-def customer_silicon_login(raw_token: str, body: SiliconLogin) -> dict[str, Any]:
+def customer_silicon_login(
+    raw_token: str, body: SiliconLogin, request: Request
+) -> dict[str, Any]:
+    require_web_request(request)
     if not body.consent:
         raise HTTPException(400, "请先确认授权范围")
     phone = normalize_phone(body.phone)
     current = db.now_ts()
     with db.connect(immediate=True) as conn:
         order = get_order_by_customer_token(conn, raw_token)
+        require_mutable_customer_order(order)
         adapter = get_silicon_adapter(order["silicon_mode"])
         result = adapter.login(phone, body.otp)
         consent_id = db.new_id("consent")
@@ -489,20 +591,26 @@ def customer_silicon_login(raw_token: str, body: SiliconLogin) -> dict[str, Any]
         audit(conn, "CUSTOMER", actor_ref, "SILICON_PROXY_LOGIN", "ORDER", order["id"],
               {"adapter_mode": order["silicon_mode"], "session_expires_at": expires_at})
         order = conn.execute("SELECT * FROM orders WHERE id=?", (order["id"],)).fetchone()
-        payload = order_payload(conn, order, include_tid=True)
+        payload = order_payload(
+            conn, order, include_tid=True, include_invitation=True
+        )
         payload["session_expires_at"] = expires_at
         payload["adapter_result"] = adapter_result(result)
         return payload
 
 
 @app.post("/api/customer/{raw_token}/manual-invitation")
-def customer_manual_invite(raw_token: str, body: ManualInvite) -> dict[str, Any]:
+def customer_manual_invite(
+    raw_token: str, body: ManualInvite, request: Request
+) -> dict[str, Any]:
+    require_web_request(request)
     if not body.consent:
         raise HTTPException(400, "请先确认信息提交授权")
     code, url = parse_invitation(body.invitation)
     current = db.now_ts()
     with db.connect(immediate=True) as conn:
         order = get_order_by_customer_token(conn, raw_token)
+        require_mutable_customer_order(order)
         conn.execute(
             """
             UPDATE orders SET invitation_code=?, invitation_url=?, invitation_source='USER_ASSERTED',
@@ -512,7 +620,9 @@ def customer_manual_invite(raw_token: str, body: ManualInvite) -> dict[str, Any]
         )
         audit(conn, "CUSTOMER", None, "SUBMIT_INVITATION", "ORDER", order["id"], {"source": "USER_ASSERTED"})
         order = conn.execute("SELECT * FROM orders WHERE id=?", (order["id"],)).fetchone()
-        return order_payload(conn, order, include_tid=True)
+        return order_payload(
+            conn, order, include_tid=True, include_invitation=True
+        )
 
 
 @app.get("/api/tasks")
@@ -588,7 +698,7 @@ def lock_reward(conn: sqlite3.Connection, assignment: sqlite3.Row, upstream_key:
         return {"assignment": dict(assignment), "reward": dict(reward) if reward else None, "idempotent": True}
     if assignment["status"] in {"VERIFIED_NO_REWARD", "ORDER_EXPIRED"}:
         return {"assignment": dict(assignment), "reward": None, "idempotent": True}
-    if order["expires_at"] <= current or order["status"] == "CLOSED":
+    if order["expires_at"] <= current or order["status"] != "ACTIVE":
         conn.execute("UPDATE assignments SET status='ORDER_EXPIRED', updated_at=? WHERE id=?", (current, assignment["id"]))
         return {"assignment": dict(conn.execute("SELECT * FROM assignments WHERE id=?", (assignment["id"],)).fetchone()), "reward": None}
     prior = conn.execute("SELECT id FROM rewards WHERE upstream_user_key=?", (upstream_key,)).fetchone()
@@ -681,6 +791,100 @@ def mock_verify(assignment_id: str, request: Request) -> dict[str, Any]:
         return result
 
 
+@app.put("/api/assignments/{assignment_id}/silicon-account")
+def submit_silicon_account(
+    assignment_id: str, body: SiliconAccountClaim, request: Request
+) -> dict[str, Any]:
+    require_web_request(request)
+    user = current_user(request)
+    account_id = normalize_upstream_account_id(body.account_id)
+    upstream_key = hmac_hex(account_id, "upstream-user")
+    current = db.now_ts()
+    with db.connect(immediate=True) as conn:
+        db.sweep(conn, current)
+        assignment = conn.execute(
+            """
+            SELECT a.*, o.status AS order_status, o.expires_at AS order_expires_at
+            FROM assignments a JOIN orders o ON o.id=a.order_id
+            WHERE a.id=? AND a.user_id=?
+            """,
+            (assignment_id, user["id"]),
+        ).fetchone()
+        if not assignment:
+            raise HTTPException(404, "抢单记录不存在")
+        if (
+            assignment["status"] not in {"ACTIVE", "EXPIRED"}
+            or assignment["order_status"] != "ACTIVE"
+            or assignment["order_expires_at"] <= current
+        ):
+            raise HTTPException(409, "当前抢单记录不能提交 SiliconFlow 用户 ID")
+        existing = conn.execute(
+            "SELECT * FROM assignment_upstream_claims WHERE assignment_id=?",
+            (assignment_id,),
+        ).fetchone()
+        if existing and existing["status"] != "PENDING":
+            raise HTTPException(409, "SiliconFlow 用户 ID 已完成复核")
+        if existing and hmac.compare_digest(existing["upstream_user_key"], upstream_key):
+            return {
+                "upstream_claim": {
+                    "status": existing["status"],
+                    "account_id_mask": existing["account_id_mask"],
+                    "submitted_at": existing["submitted_at"],
+                    "updated_at": existing["updated_at"],
+                    "reviewed_at": existing["reviewed_at"],
+                },
+                "idempotent": True,
+            }
+        submitted_at = existing["submitted_at"] if existing else current
+        conn.execute(
+            """
+            INSERT INTO assignment_upstream_claims(
+                assignment_id,account_id_cipher,upstream_user_key,account_id_mask,status,
+                submitted_at,updated_at
+            ) VALUES(?,?,?,?,?,?,?)
+            ON CONFLICT(assignment_id) DO UPDATE SET
+                account_id_cipher=excluded.account_id_cipher,
+                upstream_user_key=excluded.upstream_user_key,
+                account_id_mask=excluded.account_id_mask,
+                status='PENDING',
+                updated_at=excluded.updated_at,
+                reviewed_at=NULL
+            """,
+            (
+                assignment_id,
+                encrypt_text(account_id, f"assignment:{assignment_id}:upstream-account"),
+                upstream_key,
+                mask_upstream_account_id(account_id),
+                "PENDING",
+                submitted_at,
+                current,
+            ),
+        )
+        audit(
+            conn,
+            "USER",
+            user["id"],
+            "SUBMIT_SILICON_ACCOUNT",
+            "ASSIGNMENT",
+            assignment_id,
+            {"changed": bool(existing)},
+        )
+        claim = conn.execute(
+            "SELECT * FROM assignment_upstream_claims WHERE assignment_id=?",
+            (assignment_id,),
+        ).fetchone()
+        return {
+            "upstream_claim": {
+                "status": claim["status"],
+                "account_id_mask": claim["account_id_mask"],
+                "submitted_at": claim["submitted_at"],
+                "updated_at": claim["updated_at"],
+                "reviewed_at": claim["reviewed_at"],
+            },
+            "idempotent": False,
+        }
+
+
 @app.get("/api/me/assignments")
 def my_assignments(request: Request) -> dict[str, Any]:
     user = current_user(request)
@@ -688,15 +892,28 @@ def my_assignments(request: Request) -> dict[str, Any]:
         db.sweep(conn)
         rows = conn.execute(
             """
-            SELECT a.*, o.target_n, o.invitation_url, o.public_slug, o.expires_at AS order_expires_at,
-                   r.id AS reward_id, r.status AS reward_status
+            SELECT a.*, o.target_n, o.invitation_code, o.invitation_url, o.public_slug,
+                   o.expires_at AS order_expires_at, r.id AS reward_id, r.status AS reward_status,
+                   c.status AS claim_status, c.account_id_mask, c.submitted_at,
+                   c.updated_at AS claim_updated_at, c.reviewed_at
             FROM assignments a JOIN orders o ON o.id=a.order_id
             LEFT JOIN rewards r ON r.assignment_id=a.id
+            LEFT JOIN assignment_upstream_claims c ON c.assignment_id=a.id
             WHERE a.user_id=? ORDER BY a.created_at DESC
             """,
             (user["id"],),
         ).fetchall()
-        return {"assignments": [dict(row) for row in rows]}
+        assignments = []
+        for row in rows:
+            item = dict(row)
+            item["upstream_claim"] = upstream_claim_payload(row)
+            for key in (
+                "claim_status", "account_id_mask", "submitted_at",
+                "claim_updated_at", "reviewed_at",
+            ):
+                item.pop(key, None)
+            assignments.append(item)
+        return {"assignments": assignments}
 
 
 @app.get("/api/me/notifications")
@@ -718,19 +935,32 @@ def admin_summary(x_admin_key: str | None = Header(default=None)) -> dict[str, A
         orders = conn.execute("SELECT * FROM orders ORDER BY created_at DESC").fetchall()
         order_data = []
         for order in orders:
-            item = order_payload(conn, order, include_tid=True)
-            item["assignments"] = [
-                dict(row) for row in conn.execute(
-                    """
-                    SELECT a.id,a.status,a.claimed_at,a.reservation_expires_at,a.registered_at,a.verified_at,
-                           u.phone_mask,r.id AS reward_id,r.status AS reward_status
-                    FROM assignments a JOIN users u ON u.id=a.user_id
-                    LEFT JOIN rewards r ON r.assignment_id=a.id
-                    WHERE a.order_id=? ORDER BY a.created_at
-                    """,
-                    (order["id"],),
-                ).fetchall()
-            ]
+            item = order_payload(
+                conn, order, include_tid=True, include_invitation=True
+            )
+            assignment_rows = conn.execute(
+                """
+                SELECT a.id,a.status,a.claimed_at,a.reservation_expires_at,a.registered_at,a.verified_at,
+                       u.phone_mask,r.id AS reward_id,r.status AS reward_status,
+                       c.status AS claim_status,c.account_id_mask,c.submitted_at,
+                       c.updated_at AS claim_updated_at,c.reviewed_at
+                FROM assignments a JOIN users u ON u.id=a.user_id
+                LEFT JOIN rewards r ON r.assignment_id=a.id
+                LEFT JOIN assignment_upstream_claims c ON c.assignment_id=a.id
+                WHERE a.order_id=? ORDER BY a.created_at
+                """,
+                (order["id"],),
+            ).fetchall()
+            item["assignments"] = []
+            for row in assignment_rows:
+                assignment_item = dict(row)
+                assignment_item["upstream_claim"] = upstream_claim_payload(row)
+                for key in (
+                    "claim_status", "account_id_mask", "submitted_at",
+                    "claim_updated_at", "reviewed_at",
+                ):
+                    assignment_item.pop(key, None)
+                item["assignments"].append(assignment_item)
             order_data.append(item)
         rewards = [
             dict(row) for row in conn.execute(
@@ -748,19 +978,46 @@ def admin_summary(x_admin_key: str | None = Header(default=None)) -> dict[str, A
 def admin_verify(assignment_id: str, body: ManualVerify, x_admin_key: str | None = Header(default=None)) -> dict[str, Any]:
     require_admin(x_admin_key)
     with db.connect(immediate=True) as conn:
+        db.sweep(conn)
         assignment = conn.execute("SELECT * FROM assignments WHERE id=?", (assignment_id,)).fetchone()
         if not assignment:
             raise HTTPException(404, "抢单记录不存在")
-        upstream_key = hmac_hex(body.upstream_account_id, "upstream-user")
+        account_id = normalize_upstream_account_id(body.upstream_account_id)
+        upstream_key = hmac_hex(account_id, "upstream-user")
+        claim = conn.execute(
+            "SELECT * FROM assignment_upstream_claims WHERE assignment_id=?",
+            (assignment_id,),
+        ).fetchone()
+        if claim and not hmac.compare_digest(claim["upstream_user_key"], upstream_key):
+            raise HTTPException(409, "复核的 SiliconFlow 用户 ID 与抢单人提交值不一致")
         if not body.valid_authentication:
+            if assignment["status"] not in {"ACTIVE", "EXPIRED"}:
+                raise HTTPException(409, "已进入奖励流程的记录不能改为无效")
             current = db.now_ts()
             conn.execute(
                 "UPDATE assignments SET status='VERIFIED_NO_REWARD', registered_at=COALESCE(registered_at,?), verified_at=?, upstream_user_key=?, updated_at=? WHERE id=?",
                 (current, current, upstream_key, current, assignment_id),
             )
+            if claim:
+                conn.execute(
+                    """
+                    UPDATE assignment_upstream_claims
+                    SET status='REJECTED',reviewed_at=?,updated_at=? WHERE assignment_id=?
+                    """,
+                    (current, current, assignment_id),
+                )
             result = {"assignment": dict(conn.execute("SELECT * FROM assignments WHERE id=?", (assignment_id,)).fetchone()), "reward": None}
         else:
             result = lock_reward(conn, assignment, upstream_key)
+            if claim:
+                current = db.now_ts()
+                conn.execute(
+                    """
+                    UPDATE assignment_upstream_claims
+                    SET status='CONFIRMED',reviewed_at=?,updated_at=? WHERE assignment_id=?
+                    """,
+                    (current, current, assignment_id),
+                )
         audit(conn, "ADMIN", "admin", "VERIFY_ASSIGNMENT", "ASSIGNMENT", assignment_id,
               {"valid_authentication": body.valid_authentication})
         return result

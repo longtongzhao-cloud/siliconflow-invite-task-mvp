@@ -8,6 +8,8 @@
 
 测试部署必须显式配置 `MVP_ALLOWED_HOSTS`，Uvicorn 只监听回环地址。证书申请前的 HTTP 服务只允许 ACME 验证，禁止通过明文 HTTP 使用管理台或传输客户数据。SQLite 只允许单应用进程，并通过 SQLite backup API 备份；直接复制运行中的数据库文件不属于有效备份。
 
+WSL Quick Tunnel 会生成公开互联网地址，只允许合成数据和人工监督下的短时联调。启动脚本必须保留显式风险确认、随机凭据、精确 Host 白名单、Secure Cookie、临时数据库和退出清理；不得把 Quick Tunnel 当作固定生产入口，也不得在其中输入真实 OTP、Cookie、支付或身份资料。
+
 ## 报告安全问题
 
 不要在公开 Issue 中提交漏洞利用细节、真实账号、手机号、OTP、Cookie、令牌、支付流水或数据库副本。仓库所有者应在 GitHub 创建仓库后启用 Private vulnerability reporting，并通过该渠道接收报告。

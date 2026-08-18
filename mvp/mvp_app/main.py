@@ -355,7 +355,7 @@ def verify_site_code(body: PhoneVerify, response: Response) -> dict[str, Any]:
             user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
         audit(conn, "USER", user["id"], "LOGIN", "USER", user["id"])
     response.set_cookie(
-        "mvp_session", sign_session(user["id"]), httponly=True, secure=not SETTINGS.is_development,
+        "mvp_session", sign_session(user["id"]), httponly=True, secure=SETTINGS.cookie_secure,
         samesite="lax", max_age=7 * 24 * 3600, path="/",
     )
     return {"user": {"id": user["id"], "phone": user["phone_mask"], "alipay_bound": bool(user["alipay_hmac"])}}

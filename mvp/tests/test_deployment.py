@@ -101,6 +101,7 @@ def test_installer_generates_fail_closed_production_modes() -> None:
 
     assert "MVP_ENV=production" in installer
     assert "MVP_ALLOWED_HOSTS=${domain},127.0.0.1,localhost" in installer
+    assert "MVP_COOKIE_SECURE=1" in installer
     assert "MVP_SILICON_MODE=manual" in installer
     assert "MVP_SITE_SMS_MODE=disabled" in installer
     assert "MVP_REMOTE_BROWSER_MODE=disabled" in installer
@@ -115,3 +116,27 @@ def test_installer_generates_fail_closed_production_modes() -> None:
     assert 'systemctl start "${app_name}-backup.service"' in restore
     assert 'systemctl stop "${app_name}.service"' in restore
     assert "restart_after_error" in restore
+
+
+def test_quick_tunnel_requires_explicit_risk_and_ephemeral_data() -> None:
+    script = (DEPLOY_ROOT / "wsl" / "start-quick-tunnel.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "--accept-public-demo-risk" in script
+    assert "mktemp -d" in script
+    assert 'MVP_DB_PATH="${database_path}"' in script
+    assert "MVP_COOKIE_SECURE=1" in script
+    assert 'MVP_ALLOWED_HOSTS="${public_host},127.0.0.1,localhost"' in script
+    assert "MVP_SEED_DEMO=0" in script
+    assert 'rm -rf -- "${runtime_dir}"' in script
+    assert "*.trycloudflare.com" not in script
+    assert "--self-test-flow" in script
+
+    flow = (DEPLOY_ROOT / "wsl" / "quick_tunnel_flow.py").read_text(
+        encoding="utf-8"
+    )
+    assert "HTTPCookieProcessor" in flow
+    assert "cookie.secure" in flow
+    assert '"PAYOUT_PENDING"' in flow
+    assert '"PAID"' in flow

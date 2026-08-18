@@ -56,7 +56,7 @@ cd ./mvp
 
 Linux 服务启动冒烟测试：`./mvp/smoke-test.sh`。
 
-Ubuntu 单机测试部署资产位于 `mvp/deploy/`。在购买域名和服务器前可先执行 `sudo bash mvp/deploy/validate-assets.sh`；完整流程见 [Ubuntu 测试部署](mvp/deploy/README.md)。
+购买域名和服务器前，可用 WSL + Cloudflare Quick Tunnel 获得临时公网 HTTPS 地址并从手机联调，见 [WSL 临时公网测试](mvp/deploy/wsl/README.md)。固定域名的 Ubuntu 单机部署资产位于 `mvp/deploy/`，完整流程见 [Ubuntu 测试部署](mvp/deploy/README.md)。
 
 运行完整技术验证：
 

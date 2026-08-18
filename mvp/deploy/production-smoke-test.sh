@@ -21,6 +21,7 @@ MVP_DB_PATH="${database_path}" \
 MVP_SECRET=test-only-production-secret-material-over-32-bytes \
 MVP_ADMIN_KEY=test-only-production-admin-key \
 MVP_ALLOWED_HOSTS="${test_host},127.0.0.1,localhost" \
+MVP_COOKIE_SECURE=1 \
 MVP_SILICON_MODE=manual \
 MVP_SITE_SMS_MODE=disabled \
 MVP_REMOTE_BROWSER_MODE=disabled \

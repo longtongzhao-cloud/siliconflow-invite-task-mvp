@@ -204,7 +204,7 @@ Mock 按钮只在 `development` 环境出现，不能证明真人已经在 Silic
 powershell -ExecutionPolicy Bypass -File .\run-tests.ps1
 ```
 
-当前基线应得到 53 项测试通过。外部技术验证在 `..\tech-validation` 目录执行：
+当前基线应得到 56 项测试通过。外部技术验证在 `..\tech-validation` 目录执行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\run-validation.ps1
@@ -225,6 +225,7 @@ cd ../tech-validation
 - `PROJECT_STATUS.md`：当前阶段、已知阻塞和下一步开发顺序。
 - `MVP-STAGE-REPORT.md`：MVP 阶段验收结论。
 - `README.md`：项目概览、开发配置和快速启动。
+- `deploy/wsl/README.md`：无需购买域名和服务器的 WSL 临时公网手机联调步骤。
 - `deploy/README.md`：Ubuntu 测试服务器、DNS、HTTPS、防火墙、备份和验证步骤。
 - `..\tech-validation\validation-report.md`：外部协议、风险和 Go/No-Go 总结。
 - `..\tech-validation\live-test-runbook.md`：具备真实账号与权限后的现场验证步骤。

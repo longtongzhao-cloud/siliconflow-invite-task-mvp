@@ -26,6 +26,7 @@ class Settings:
     secret: str
     admin_key: str
     allowed_hosts: tuple[str, ...]
+    cookie_secure: bool
     silicon_mode: str
     site_sms_mode: str
     remote_browser_mode: str
@@ -73,6 +74,10 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         for host in allowed_hosts
     ):
         raise ConfigurationError("MVP_ALLOWED_HOSTS contains an invalid or unsafe host")
+    cookie_secure = _parse_bool(
+        values.get("MVP_COOKIE_SECURE", "0" if is_development else "1"),
+        "MVP_COOKIE_SECURE",
+    )
     silicon_mode = values.get(
         "MVP_SILICON_MODE", "mock" if is_development else "live-disabled"
     ).strip().lower()
@@ -129,12 +134,15 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
             raise ConfigurationError("production cannot use the mock site SMS provider")
         if seed_demo:
             raise ConfigurationError("production cannot seed demo data")
+        if not cookie_secure:
+            raise ConfigurationError("production cannot disable secure cookies")
 
     return Settings(
         environment=environment,
         secret=secret,
         admin_key=admin_key,
         allowed_hosts=allowed_hosts,
+        cookie_secure=cookie_secure,
         silicon_mode=silicon_mode,
         site_sms_mode=site_sms_mode,
         remote_browser_mode=remote_browser_mode,

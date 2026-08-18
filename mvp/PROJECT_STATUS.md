@@ -1,7 +1,7 @@
 # Project Status
 
 最后核对日期：2026-08-18
-当前阶段：本地 MVP 与测试部署资产已通过；公网资源和生产外部接入未通过。
+当前阶段：本地 MVP、WSL 临时公网 mock 链路与测试部署资产已通过；稳定公网和生产外部接入未通过。
 仓库根目录：`outputs/`  
 应用目录：`outputs/mvp/`
 
@@ -9,7 +9,7 @@
 
 构建一个从淘宝订单到任务结算的邀新任务系统：淘宝 SKU 对应 1/5/10 个有效完成者；客户提供 SiliconFlow 邀请信息后生成任务链接；抢单人完成本站手机号登录和支付宝收款信息登记，领取 30 分钟保护名额，并在订单 24 小时有效期内完成 SiliconFlow 新用户注册、填写邀请码和首次有效实名认证；系统最多锁定 N 份 5 元奖励，第一版由管理员人工支付宝转账。
 
-当前可执行目标是先采用人工淘宝运营：人工确认付款、人工建单并发送客户链接，不开发淘宝 live 适配器。Ubuntu 单机部署代码已准备完成，下一步需要开通域名和云服务器，执行 DNS、HTTPS、防火墙和备份现场验证；随后完成 SiliconFlow 真实代理登录和本站真实短信的受控端到端验证。生产上线不是当前已完成状态。
+当前可执行目标是先采用人工淘宝运营：人工确认付款、人工建单并发送客户链接，不开发淘宝 live 适配器。购买域名和云服务器前，先用 WSL + Cloudflare Quick Tunnel 的临时 HTTPS 地址完成三角色手机端受控联调；只有流程被人工验收、确实需要固定地址和持续在线后再购买资源。随后完成 SiliconFlow 真实代理登录和本站真实短信的受控端到端验证。生产上线不是当前已完成状态。
 
 ## 已完成内容
 
@@ -32,6 +32,7 @@
 - 已修复退款/关闭订单可被客户接口重新激活、退款后超时记录仍可获奖、已锁奖励可被无效审核降级三个状态漏洞。
 - 生产配置新增 `MVP_ALLOWED_HOSTS` 和 Trusted Host 中间件；生产必须显式声明域名，未知 Host 返回 400。
 - `deploy/` 已提供 Ubuntu 安装、systemd、Nginx HTTP/HTTPS、Let's Encrypt、显式 UFW、健康检查和生产启动烟雾测试。
+- `deploy/wsl/` 已提供 Cloudflare Quick Tunnel 安装和临时公网启动脚本；不依赖自有域名、云服务器或 Cloudflare 账号，每轮使用临时数据库、随机凭据、精确 Host 白名单和 Secure Cookie。
 - SQLite 备份使用 backup API 创建一致性副本并执行 `integrity_check`；systemd timer 每日运行，默认保留 7 天。
 
 ### 技术验证材料
@@ -55,6 +56,7 @@
 13. **淘宝第一阶段采用人工运营**：淘宝只作为付款和聊天渠道；运营人员核对付款后在本站建单并人工发送客户链接。生产 webhook、订单查询和自动聊天不在当前开发范围内。
 14. **测试部署采用单进程单机**：Uvicorn 仅监听 `127.0.0.1`，Nginx 是唯一公网入口；SQLite 阶段禁止多 worker。HTTP 只用于 ACME，证书成功后才代理应用。
 15. **防火墙必须显式启用**：安装脚本不会自动开启 UFW，避免错误 SSH 端口导致失联；运营人员必须传入实际 SSH 端口执行独立脚本。
+16. **先临时联调、后购买资源**：WSL Quick Tunnel 只用于合成数据和人工监督下的短时测试，退出即删除数据库并失效；它不能替代固定域名、7x24 服务器、备份、监控或生产安全能力。
 
 ## 核心文件
 
@@ -69,8 +71,9 @@
 | `static/index.html` | 单页应用外壳和登录/支付宝对话框 |
 | `static/app.js` | 客户、抢单人和管理员端交互 |
 | `static/styles.css` | 桌面/移动响应式样式 |
-| `deploy/` | Ubuntu 安装、Nginx/HTTPS、systemd、UFW、健康检查、生产烟雾测试和 SQLite 备份 |
-| `tests/conftest.py` / `tests/test_mvp.py` / `tests/test_config.py` / `tests/test_deployment.py` | 53 项配置、API、权限、并发、安全、部署和生命周期测试 |
+| `deploy/` | Ubuntu 安装、Nginx/HTTPS、systemd、UFW、健康检查、生产烟雾测试、SQLite 备份和 WSL 临时公网联调 |
+| `deploy/wsl/` | cloudflared 官方仓库安装、临时公网编排和全流程公网自测 |
+| `tests/conftest.py` / `tests/test_mvp.py` / `tests/test_config.py` / `tests/test_deployment.py` | 56 项配置、API、权限、并发、安全、部署和生命周期测试 |
 | `run.ps1` / `run-tests.ps1` | 本地启动和复验入口 |
 | `run.sh` / `run-tests.sh` / `smoke-test.sh` | Linux/macOS 启动、测试和服务健康检查入口 |
 | `requirements.txt` / `requirements-dev.txt` / `.env.example` / `.env.production.example` | 运行依赖、开发测试依赖和非敏感配置模板 |
@@ -86,14 +89,14 @@
 
 ## 测试与验证结果
 
-2026-08-17 在当前工作区重新执行：
+2026-08-18 在当前工作区重新执行：
 
 ```powershell
 cd outputs\mvp
 powershell -ExecutionPolicy Bypass -File .\run-tests.ps1
 ```
 
-Windows PowerShell 最新结果：`53 passed in 10.82s`，无测试警告。覆盖：
+Windows PowerShell 最新结果：`56 passed in 9.96s`，无测试警告。覆盖：
 
 - mock 代理登录、会话密文检查、邀请码返回、抢单、认证、奖励和支付完整闭环；
 - SKU 1/5/10 映射；登录和支付宝前置条件；
@@ -115,15 +118,17 @@ Windows PowerShell 最新结果：`53 passed in 10.82s`，无测试警告。覆�
 - 合成会话安全：8/8；
 - Markdown/JSON 敏感输出扫描：13 个文件通过。
 
-2026-08-17 在 WSL2 Ubuntu 24.04.1 上重新执行原生 Linux 复验：
+2026-08-18 在 WSL2 Ubuntu 24.04.1 上重新执行原生 Linux 复验：
 
 - Linux Python 3.12.3，虚拟环境解释器解析到 `/usr/bin/python3.12`；
-- `./run-tests.sh`：`53 passed in 11.46s`；
+- `./run-tests.sh`：`56 passed in 11.80s`；
 - `deploy/production-smoke-test.sh`：生产模式启动成功，`manual/disabled/disabled` 失败关闭组合正确，未知 Host 返回 400；
 - `deploy/validate-assets.sh`：systemd 单元和 Nginx 1.24 HTTP/HTTPS 模板解析通过；
 - `./smoke-test.sh`：Uvicorn 启动成功，`/api/health` 返回 200，并明确报告 `site_sms_mode=mock`、`remote_browser_mode=disabled`；
 - PowerShell 7.6.5 下完整技术验证通过：只读端点 23、业务规则 5/5、并发 6/6、会话安全 8/8、敏感输出扫描通过；
 - Linux 虚拟环境 `pip check` 无依赖冲突，`pip-audit` 未发现已知漏洞。
+
+同日完成 WSL 临时公网现场验证：安装 `cloudflared 2026.8.2`，通过随机 `trycloudflare.com` HTTPS 地址从公网访问健康检查，并自动走完“管理员建单 -> 客户 mock 登录/邀请码 -> 抢单人本站登录/支付宝登记 -> 抢单 -> mock 注册认证 -> 人工支付登记”的完整闭环，最终奖励状态为 `PAID`。临时地址、随机凭据、数据库和日志在测试结束后均已销毁；该结果只证明公网页面与 mock 业务链路，不代表真实短信或真实 SiliconFlow 已通过。
 
 本次浏览器验收覆盖 390×844 手机和 1440×900 桌面：未抢单邀请码不可见，登录/支付宝/抢单后官方链接出现，用户 ID 提交后只显示掩码和待核验；按钮最小高度 44px，无横向溢出，控制台 0 个错误/警告。本地服务运行于 `http://127.0.0.1:8765`。
 
@@ -134,6 +139,8 @@ Windows PowerShell 最新结果：`53 passed in 10.82s`，无测试警告。覆�
 2026-08-17 完成生产配置失败关闭：新增集中配置、生产配置模板、启动级占位值拒绝、本站短信禁用保护及对应测试；Windows 和 WSL 均已复验。
 
 2026-08-18 完成测试部署代码准备：新增可信 Host、Ubuntu/systemd/Nginx/Let's Encrypt/UFW 脚本、生产烟雾测试、SQLite 一致性备份与 CI 覆盖。尚未在真实云服务器和域名执行。
+
+2026-08-18 完成免购买资源的 WSL 临时公网方案：新增 Cloudflare Quick Tunnel 安装/编排脚本、Secure Cookie 显式配置、临时数据清理和公网全流程自测；实际公网 mock 闭环已通过。
 
 `git add --dry-run .` 已确认候选列表只包含源码、测试、文档和仓库配置；`mvp/.venv/`、`mvp/data/mvp.db`、缓存和 `tech-validation/evidence/*.json` 均被忽略。
 
@@ -160,7 +167,7 @@ Windows PowerShell 最新结果：`53 passed in 10.82s`，无测试警告。覆�
 
 ### 部署、账号与运营
 
-- 尚无公网域名和云服务器；因此 DNS、真实 Let's Encrypt、云安全组和公网 HTTPS 尚未现场通过。
+- 尚无自有公网域名和云服务器；DNS、真实 Let's Encrypt、云安全组和稳定公网 HTTPS 尚未现场通过。WSL 临时公网 HTTPS 已通过，但 URL 每次启动变化，依赖本机开机、网络和前台脚本，不能用于 7x24 服务。
 - systemd/Nginx/UFW 和 SQLite 备份代码已准备并在 WSL 解析验证，但尚未完成真实服务器安装、跨机备份、恢复演练和监控告警。
 - 仍无 KMS、管理员 MFA/RBAC 和生产 PostgreSQL；当前部署仅允许单进程 SQLite 测试环境。
 - 候选域名未购买；`gjlt.com` 已被注册，其他候选在购买前必须重新查询实时状态和商标/混淆风险。
@@ -176,16 +183,17 @@ Windows PowerShell 最新结果：`53 passed in 10.82s`，无测试警告。覆�
 3. **通过标准 OAuth/OIDC 获取 SiliconFlow 邀请数据**：公开 discovery 和 API Reference 未发现邀请/认证 scope 或端点。
 4. **用淘宝个人开发者认证直接取得订单权限**：当前应用软件开发商及自研商家指南要求企业身份/资料，尚未得到 `trade.fullinfo.get` 或消息订阅权限。
 5. **自动通过淘宝聊天发送动态外链**：未发现当前账号已有专项能力，MVP 保留人工复制发送。
-6. **本地电脑承接生产回调**：可以开发和受监督联调，但没有稳定公网 HTTPS 地址，不能作为 7x24 淘宝 webhook 和客户访问方案。
+6. **本地电脑承接生产回调**：Quick Tunnel 已证明可以开发和受监督联调，但没有固定地址或 SLA，不能作为 7x24 淘宝 webhook 和客户访问方案。
 7. **普通阿里云短信自用签名**：个人主体无法完成当前运营商实名报备；应改用免企业资质的短信认证产品或后续企业资质。
 
 ## 下一步开发顺序
 
 1. **配置 GitHub 协作保护**：仓库已经公开；下一步确定许可证和对外披露范围，为 `main` 启用 PR、CI 和至少一名审查者要求，启用私密漏洞报告，并邀请实际协作者。
-2. **开通并验证测试部署**：部署代码已完成；下一步重新查询并购买中性、非官方混淆域名与预算内 Ubuntu 服务器，按 `deploy/README.md` 执行 DNS、安装、UFW、Let's Encrypt、健康检查、备份及恢复演练。中国香港节点可用于快速联调，内地正式服务另行处理备案和网络质量。
+2. **WSL 手机端受控验收**：按 `deploy/wsl/README.md` 启动临时 HTTPS，只用合成数据，让管理员、客户和抢单人分别用手机完成 mock 流程并记录页面/操作问题；每轮结束关闭隧道并确认临时数据已删除。
 3. **接入本站真实短信**：优先验证阿里云号码认证服务的短信认证；将固定演示验证码替换为发送/核验 API、限流和回执处理。
-4. **生产化基础设施**：生产配置失败关闭已完成；后续将 SQLite 迁移 PostgreSQL，引入 schema migration、KMS/密钥轮换、管理员 MFA/RBAC、审计、备份恢复、错误监控和一键冻结开关。
-5. **手机真人接力网关**：具备 HTTPS 服务器后实现隔离 Chromium、一次性 viewer、5 分钟空闲销毁、断线重连、受信回调验签和清理重试；账号本人解决 CAPTCHA 并输入 OTP，禁止验证码/令牌日志。取得 SiliconFlow 许可前保持失败关闭。
+4. **手机真人接力网关**：临时 HTTPS 已不再是界面联调阻塞；下一步实现隔离 Chromium、一次性 viewer、5 分钟空闲销毁、断线重连、受信回调验签和清理重试。账号本人解决 CAPTCHA 并输入 OTP，禁止验证码/令牌日志；取得 SiliconFlow 许可前保持失败关闭。
+5. **决定固定基础设施**：手机端流程通过且需要固定地址/持续在线后，再查询并购买中性域名与预算内 Ubuntu 服务器，按 `deploy/README.md` 完成 DNS、UFW、Let's Encrypt、健康检查、跨机备份和恢复演练。
+6. **生产化基础设施**：将 SQLite 迁移 PostgreSQL，引入 schema migration、KMS/密钥轮换、管理员 MFA/RBAC、审计、备份恢复、错误监控和一键冻结开关。
 6. **真人三阶段验收**：使用一个全新用户依次验证注册前、注册未实名、首次有效实名；人工对照官方邀请记录，测量状态延迟。无法获得重复/无效样本时保持人工判奖。
 7. **支付与争议闭环**：执行一笔受控 5 元人工转账，验证流水幂等、支付失败不释放容量、隐私遮罩、对账和申诉处理。
 8. **人工订单运营验收**：验证付款核对、重复订单号拦截、错单关闭、链接错发处置、退款处理和操作审计；淘宝 API 仅作为未来可选增强项。
@@ -200,7 +208,8 @@ Windows PowerShell 最新结果：`53 passed in 10.82s`，无测试警告。覆�
 - 技术验证：在 `../tech-validation/` 执行 `powershell -ExecutionPolicy Bypass -File .\run-validation.ps1`
 - 阶段结论：`MVP-STAGE-REPORT.md`
 - 当前版本使用说明：`USER_GUIDE.md`
-- Ubuntu 测试部署：`deploy/README.md`
+- WSL 临时公网测试：`deploy/wsl/README.md`
+- Ubuntu 固定服务器部署：`deploy/README.md`
 - 外部接口与风险总览：`../tech-validation/validation-report.md`
 - 真人现场步骤：`../tech-validation/live-test-runbook.md`
 

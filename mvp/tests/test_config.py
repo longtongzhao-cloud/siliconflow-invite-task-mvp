@@ -15,6 +15,7 @@ def production_environment(**overrides: str) -> dict[str, str]:
         "MVP_ENV": "production",
         "MVP_SECRET": "production-secret-material-is-at-least-32-bytes",
         "MVP_ADMIN_KEY": "production-admin-key",
+        "MVP_ALLOWED_HOSTS": "tasks.example.com,127.0.0.1,localhost",
         "MVP_SILICON_MODE": "live-disabled",
         "MVP_SITE_SMS_MODE": "disabled",
         "MVP_SEED_DEMO": "0",
@@ -29,6 +30,7 @@ def test_development_defaults_are_explicit() -> None:
     assert settings.is_development is True
     assert settings.secret == DEVELOPMENT_SECRET
     assert settings.admin_key == DEVELOPMENT_ADMIN_KEY
+    assert settings.allowed_hosts == ("localhost", "127.0.0.1", "testserver")
     assert settings.silicon_mode == "mock"
     assert settings.site_sms_mode == "mock"
     assert settings.remote_browser_mode == "disabled"
@@ -40,6 +42,7 @@ def test_production_accepts_only_explicit_non_demo_configuration() -> None:
     settings = load_settings(production_environment())
 
     assert settings.is_development is False
+    assert settings.allowed_hosts == ("tasks.example.com", "127.0.0.1", "localhost")
     assert settings.silicon_mode == "live-disabled"
     assert settings.site_sms_mode == "disabled"
     assert settings.development_site_otp is None
@@ -61,6 +64,8 @@ def test_production_accepts_only_explicit_non_demo_configuration() -> None:
             "MVP_ADMIN_KEY",
         ),
         ({"MVP_SILICON_MODE": "mock"}, "mock SiliconFlow"),
+        ({"MVP_ALLOWED_HOSTS": ""}, "MVP_ALLOWED_HOSTS"),
+        ({"MVP_ALLOWED_HOSTS": "*"}, "MVP_ALLOWED_HOSTS"),
         ({"MVP_SITE_SMS_MODE": "mock"}, "mock site SMS"),
         ({"MVP_SEED_DEMO": "1"}, "seed demo"),
     ],
@@ -79,6 +84,8 @@ def test_production_rejects_unsafe_configuration(
         ({"MVP_SILICON_MODE": "live"}, "MVP_SILICON_MODE"),
         ({"MVP_SITE_SMS_MODE": "console"}, "MVP_SITE_SMS_MODE"),
         ({"MVP_REMOTE_BROWSER_MODE": "external"}, "MVP_REMOTE_BROWSER_MODE"),
+        ({"MVP_ALLOWED_HOSTS": "https://example.com"}, "MVP_ALLOWED_HOSTS"),
+        ({"MVP_ALLOWED_HOSTS": "bad..example.com"}, "MVP_ALLOWED_HOSTS"),
         ({"MVP_SEED_DEMO": "sometimes"}, "MVP_SEED_DEMO"),
         ({"MVP_DEV_SITE_OTP": "12345"}, "MVP_DEV_SITE_OTP"),
     ],

@@ -12,6 +12,7 @@ from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import database as db
 from .adapters import AdapterError, adapter_result, get_silicon_adapter, parse_invitation, target_people
@@ -48,6 +49,10 @@ app = FastAPI(
     title="邀新任务台 MVP",
     docs_url="/api/docs" if SETTINGS.is_development else None,
     lifespan=lifespan,
+)
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=list(SETTINGS.allowed_hosts),
 )
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 

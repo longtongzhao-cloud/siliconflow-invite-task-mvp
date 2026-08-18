@@ -1,7 +1,7 @@
 # Project Status
 
-最后核对日期：2026-08-17
-当前阶段：本地 MVP 已通过；生产外部接入未通过。  
+最后核对日期：2026-08-18
+当前阶段：本地 MVP 与测试部署资产已通过；公网资源和生产外部接入未通过。
 仓库根目录：`outputs/`  
 应用目录：`outputs/mvp/`
 
@@ -9,7 +9,7 @@
 
 构建一个从淘宝订单到任务结算的邀新任务系统：淘宝 SKU 对应 1/5/10 个有效完成者；客户提供 SiliconFlow 邀请信息后生成任务链接；抢单人完成本站手机号登录和支付宝收款信息登记，领取 30 分钟保护名额，并在订单 24 小时有效期内完成 SiliconFlow 新用户注册、填写邀请码和首次有效实名认证；系统最多锁定 N 份 5 元奖励，第一版由管理员人工支付宝转账。
 
-当前可执行目标是先采用人工淘宝运营：人工确认付款、人工建单并发送客户链接，不开发淘宝 live 适配器；同时把本地 MVP 推进到可公网访问的测试环境，完成 SiliconFlow 真实代理登录和本站真实短信的受控端到端验证。生产上线不是当前已完成状态。
+当前可执行目标是先采用人工淘宝运营：人工确认付款、人工建单并发送客户链接，不开发淘宝 live 适配器。Ubuntu 单机部署代码已准备完成，下一步需要开通域名和云服务器，执行 DNS、HTTPS、防火墙和备份现场验证；随后完成 SiliconFlow 真实代理登录和本站真实短信的受控端到端验证。生产上线不是当前已完成状态。
 
 ## 已完成内容
 
@@ -30,6 +30,9 @@
 - 本站短信在开发模式可用固定演示码；生产环境未接入真实服务时统一返回 503，不会回退到固定验证码。
 - SiliconFlow 登录已建立独立 broker、数据表、配置和 API 失败关闭边界；真实 Chromium/viewer 网关未配置时返回 503 且不写入会话。
 - 已修复退款/关闭订单可被客户接口重新激活、退款后超时记录仍可获奖、已锁奖励可被无效审核降级三个状态漏洞。
+- 生产配置新增 `MVP_ALLOWED_HOSTS` 和 Trusted Host 中间件；生产必须显式声明域名，未知 Host 返回 400。
+- `deploy/` 已提供 Ubuntu 安装、systemd、Nginx HTTP/HTTPS、Let's Encrypt、显式 UFW、健康检查和生产启动烟雾测试。
+- SQLite 备份使用 backup API 创建一致性副本并执行 `integrity_check`；systemd timer 每日运行，默认保留 7 天。
 
 ### 技术验证材料
 
@@ -50,6 +53,8 @@
 11. **用户声明不等于平台核验**：抢单人提交的 SiliconFlow 用户 ID 独立存储为 `PENDING` 声明，不改变 assignment 注册/认证状态；只有管理员或未来受信同步器才能锁定奖励。
 12. **远程浏览器独立编排**：异步真人接力不复用同步 SiliconFlow adapter，也不得在 SQLite 写事务内启动浏览器。当前 broker 只实现 `disabled`，避免未配置网关时误启用。
 13. **淘宝第一阶段采用人工运营**：淘宝只作为付款和聊天渠道；运营人员核对付款后在本站建单并人工发送客户链接。生产 webhook、订单查询和自动聊天不在当前开发范围内。
+14. **测试部署采用单进程单机**：Uvicorn 仅监听 `127.0.0.1`，Nginx 是唯一公网入口；SQLite 阶段禁止多 worker。HTTP 只用于 ACME，证书成功后才代理应用。
+15. **防火墙必须显式启用**：安装脚本不会自动开启 UFW，避免错误 SSH 端口导致失联；运营人员必须传入实际 SSH 端口执行独立脚本。
 
 ## 核心文件
 
@@ -64,7 +69,8 @@
 | `static/index.html` | 单页应用外壳和登录/支付宝对话框 |
 | `static/app.js` | 客户、抢单人和管理员端交互 |
 | `static/styles.css` | 桌面/移动响应式样式 |
-| `tests/conftest.py` / `tests/test_mvp.py` / `tests/test_config.py` | 44 项配置、API、权限、并发、安全和生命周期测试 |
+| `deploy/` | Ubuntu 安装、Nginx/HTTPS、systemd、UFW、健康检查、生产烟雾测试和 SQLite 备份 |
+| `tests/conftest.py` / `tests/test_mvp.py` / `tests/test_config.py` / `tests/test_deployment.py` | 53 项配置、API、权限、并发、安全、部署和生命周期测试 |
 | `run.ps1` / `run-tests.ps1` | 本地启动和复验入口 |
 | `run.sh` / `run-tests.sh` / `smoke-test.sh` | Linux/macOS 启动、测试和服务健康检查入口 |
 | `requirements.txt` / `requirements-dev.txt` / `.env.example` / `.env.production.example` | 运行依赖、开发测试依赖和非敏感配置模板 |
@@ -87,7 +93,7 @@ cd outputs\mvp
 powershell -ExecutionPolicy Bypass -File .\run-tests.ps1
 ```
 
-Windows PowerShell 最新结果：`44 passed in 9.49s`，无测试警告。覆盖：
+Windows PowerShell 最新结果：`53 passed in 10.82s`，无测试警告。覆盖：
 
 - mock 代理登录、会话密文检查、邀请码返回、抢单、认证、奖励和支付完整闭环；
 - SKU 1/5/10 映射；登录和支付宝前置条件；
@@ -99,6 +105,7 @@ Windows PowerShell 最新结果：`44 passed in 9.49s`，无测试警告。覆�
 - 开发/生产配置解析、生产弱值和占位值拒绝、mock/演示能力拒绝、本站短信禁用失败关闭。
 - 公开邀请码隔离、抢单本人 ID 密文声明、跨用户对象权限、管理员复核一致性；
 - 退款订单不可复活或新增奖励、已锁奖励不可被降级、远程浏览器禁用零副作用。
+- 可信 Host、systemd/Nginx 部署约束、生产失败关闭模式和 SQLite 备份完整性。
 
 同日执行 `../tech-validation/run-validation.ps1`：
 
@@ -111,7 +118,9 @@ Windows PowerShell 最新结果：`44 passed in 9.49s`，无测试警告。覆�
 2026-08-17 在 WSL2 Ubuntu 24.04.1 上重新执行原生 Linux 复验：
 
 - Linux Python 3.12.3，虚拟环境解释器解析到 `/usr/bin/python3.12`；
-- `./run-tests.sh`：`44 passed in 11.26s`；
+- `./run-tests.sh`：`53 passed in 11.46s`；
+- `deploy/production-smoke-test.sh`：生产模式启动成功，`manual/disabled/disabled` 失败关闭组合正确，未知 Host 返回 400；
+- `deploy/validate-assets.sh`：systemd 单元和 Nginx 1.24 HTTP/HTTPS 模板解析通过；
 - `./smoke-test.sh`：Uvicorn 启动成功，`/api/health` 返回 200，并明确报告 `site_sms_mode=mock`、`remote_browser_mode=disabled`；
 - PowerShell 7.6.5 下完整技术验证通过：只读端点 23、业务规则 5/5、并发 6/6、会话安全 8/8、敏感输出扫描通过；
 - Linux 虚拟环境 `pip check` 无依赖冲突，`pip-audit` 未发现已知漏洞。
@@ -123,6 +132,8 @@ Windows PowerShell 最新结果：`44 passed in 9.49s`，无测试警告。覆�
 仓库根目录为 `outputs/`，包含应用与技术验证包。已在该目录初始化 `main` 分支，并添加 `.gitignore`、`.gitattributes`、`.editorconfig`、依赖说明、贡献指南、安全说明、PR 模板和 GitHub CI。GitHub 公开仓库为 `longtongzhao-cloud/siliconflow-invite-task-mvp`，首个基线提交和推送于 2026-08-16 完成。
 
 2026-08-17 完成生产配置失败关闭：新增集中配置、生产配置模板、启动级占位值拒绝、本站短信禁用保护及对应测试；Windows 和 WSL 均已复验。
+
+2026-08-18 完成测试部署代码准备：新增可信 Host、Ubuntu/systemd/Nginx/Let's Encrypt/UFW 脚本、生产烟雾测试、SQLite 一致性备份与 CI 覆盖。尚未在真实云服务器和域名执行。
 
 `git add --dry-run .` 已确认候选列表只包含源码、测试、文档和仓库配置；`mvp/.venv/`、`mvp/data/mvp.db`、缓存和 `tech-validation/evidence/*.json` 均被忽略。
 
@@ -149,7 +160,9 @@ Windows PowerShell 最新结果：`44 passed in 9.49s`，无测试警告。覆�
 
 ### 部署、账号与运营
 
-- 尚无公网域名、HTTPS 服务器、生产数据库、KMS、管理员 MFA、备份恢复和监控告警。
+- 尚无公网域名和云服务器；因此 DNS、真实 Let's Encrypt、云安全组和公网 HTTPS 尚未现场通过。
+- systemd/Nginx/UFW 和 SQLite 备份代码已准备并在 WSL 解析验证，但尚未完成真实服务器安装、跨机备份、恢复演练和监控告警。
+- 仍无 KMS、管理员 MFA/RBAC 和生产 PostgreSQL；当前部署仅允许单进程 SQLite 测试环境。
 - 候选域名未购买；`gjlt.com` 已被注册，其他候选在购买前必须重新查询实时状态和商标/混淆风险。
 - 本站真实短信仍未接通。固定演示验证码只允许开发模式；生产模式已失败关闭。普通阿里云短信签名需要企业资质；个人主体可评估阿里云号码认证服务的“短信认证”产品。
 - SiliconFlow 登录真实网关尚未实现：缺 Chromium 容器编排、一次性 viewer、WebRTC/noVNC、5 分钟销毁、断线重连和受信结果回调；`MVP_REMOTE_BROWSER_MODE` 必须保持 `disabled`。
@@ -169,7 +182,7 @@ Windows PowerShell 最新结果：`44 passed in 9.49s`，无测试警告。覆�
 ## 下一步开发顺序
 
 1. **配置 GitHub 协作保护**：仓库已经公开；下一步确定许可证和对外披露范围，为 `main` 启用 PR、CI 和至少一名审查者要求，启用私密漏洞报告，并邀请实际协作者。
-2. **准备测试部署**：重新查询并购买中性、非官方混淆域名；购买满足预算的轻量服务器；配置 Ubuntu、DNS、HTTPS、反向代理、防火墙和独立测试数据库。中国香港节点可用于快速联调，内地正式服务另行处理备案和网络质量。
+2. **开通并验证测试部署**：部署代码已完成；下一步重新查询并购买中性、非官方混淆域名与预算内 Ubuntu 服务器，按 `deploy/README.md` 执行 DNS、安装、UFW、Let's Encrypt、健康检查、备份及恢复演练。中国香港节点可用于快速联调，内地正式服务另行处理备案和网络质量。
 3. **接入本站真实短信**：优先验证阿里云号码认证服务的短信认证；将固定演示验证码替换为发送/核验 API、限流和回执处理。
 4. **生产化基础设施**：生产配置失败关闭已完成；后续将 SQLite 迁移 PostgreSQL，引入 schema migration、KMS/密钥轮换、管理员 MFA/RBAC、审计、备份恢复、错误监控和一键冻结开关。
 5. **手机真人接力网关**：具备 HTTPS 服务器后实现隔离 Chromium、一次性 viewer、5 分钟空闲销毁、断线重连、受信回调验签和清理重试；账号本人解决 CAPTCHA 并输入 OTP，禁止验证码/令牌日志。取得 SiliconFlow 许可前保持失败关闭。
@@ -187,6 +200,7 @@ Windows PowerShell 最新结果：`44 passed in 9.49s`，无测试警告。覆�
 - 技术验证：在 `../tech-validation/` 执行 `powershell -ExecutionPolicy Bypass -File .\run-validation.ps1`
 - 阶段结论：`MVP-STAGE-REPORT.md`
 - 当前版本使用说明：`USER_GUIDE.md`
+- Ubuntu 测试部署：`deploy/README.md`
 - 外部接口与风险总览：`../tech-validation/validation-report.md`
 - 真人现场步骤：`../tech-validation/live-test-runbook.md`
 

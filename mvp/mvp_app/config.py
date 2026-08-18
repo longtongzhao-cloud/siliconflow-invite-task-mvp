@@ -10,6 +10,10 @@ DEVELOPMENT_SECRET = "local-mvp-secret-change-before-production"
 DEVELOPMENT_ADMIN_KEY = "mvp-admin-demo"
 DEVELOPMENT_SITE_OTP = "135790"
 PLACEHOLDER_PREFIX = "replace-with-"
+HOST_PATTERN = re.compile(
+    r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+    r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*"
+)
 
 
 class ConfigurationError(RuntimeError):
@@ -21,6 +25,7 @@ class Settings:
     environment: str
     secret: str
     admin_key: str
+    allowed_hosts: tuple[str, ...]
     silicon_mode: str
     site_sms_mode: str
     remote_browser_mode: str
@@ -48,6 +53,26 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         raise ConfigurationError("MVP_ENV must be development or production")
 
     is_development = environment == "development"
+    default_hosts = "localhost,127.0.0.1,testserver" if is_development else ""
+    allowed_hosts = tuple(
+        dict.fromkeys(
+            host.strip().lower()
+            for host in values.get("MVP_ALLOWED_HOSTS", default_hosts).split(",")
+            if host.strip()
+        )
+    )
+    if not allowed_hosts:
+        raise ConfigurationError("MVP_ALLOWED_HOSTS must contain at least one host")
+    if any(
+        host == "*"
+        or "://" in host
+        or "/" in host
+        or ":" in host
+        or len(host) > 253
+        or not HOST_PATTERN.fullmatch(host)
+        for host in allowed_hosts
+    ):
+        raise ConfigurationError("MVP_ALLOWED_HOSTS contains an invalid or unsafe host")
     silicon_mode = values.get(
         "MVP_SILICON_MODE", "mock" if is_development else "live-disabled"
     ).strip().lower()
@@ -109,6 +134,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         environment=environment,
         secret=secret,
         admin_key=admin_key,
+        allowed_hosts=allowed_hosts,
         silicon_mode=silicon_mode,
         site_sms_mode=site_sms_mode,
         remote_browser_mode=remote_browser_mode,

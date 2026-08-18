@@ -53,12 +53,15 @@ jobs:
           bash -n mvp/run.sh
           bash -n mvp/run-tests.sh
           bash -n mvp/smoke-test.sh
+          sudo bash mvp/deploy/validate-assets.sh
           bash -n tech-validation/run-validation.sh
 
       - name: Smoke-test Linux launcher
         if: runner.os == 'Linux' && matrix.python-version == '3.13'
         shell: bash
-        run: ./mvp/smoke-test.sh
+        run: |
+          ./mvp/smoke-test.sh
+          bash ./mvp/deploy/production-smoke-test.sh
 
       - name: Run deterministic validation checks
         shell: pwsh

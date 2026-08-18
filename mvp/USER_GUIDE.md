@@ -12,7 +12,7 @@
 - 本站手机号登录只在开发模式使用演示验证码，不会发送真实短信；生产模式会禁用该接口，直至接入真实短信。
 - SiliconFlow 登录入口已经按失败关闭方式接入，但真实远程 Chromium/WebRTC 网关尚未配置，当前会提示使用手动邀请码。
 - 支付宝奖励由管理员线下转账，系统只登记支付结果，不会自动付款。
-- 本地服务默认只允许本机访问，没有公网 HTTPS、生产级管理员认证、备份和监控。
+- 本地服务默认只允许本机访问。仓库已有 Ubuntu/HTTPS/备份部署资产，但尚未在真实域名和服务器执行，也仍没有生产级管理员 MFA、KMS 和监控。
 
 本文中的“代理登录”“完成注册”和“有效认证”，除非明确标注为人工模式，均指不访问 SiliconFlow 的 mock 演示。
 
@@ -204,7 +204,7 @@ Mock 按钮只在 `development` 环境出现，不能证明真人已经在 Silic
 powershell -ExecutionPolicy Bypass -File .\run-tests.ps1
 ```
 
-当前基线应得到 44 项测试通过。外部技术验证在 `..\tech-validation` 目录执行：
+当前基线应得到 53 项测试通过。外部技术验证在 `..\tech-validation` 目录执行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\run-validation.ps1
@@ -225,5 +225,6 @@ cd ../tech-validation
 - `PROJECT_STATUS.md`：当前阶段、已知阻塞和下一步开发顺序。
 - `MVP-STAGE-REPORT.md`：MVP 阶段验收结论。
 - `README.md`：项目概览、开发配置和快速启动。
+- `deploy/README.md`：Ubuntu 测试服务器、DNS、HTTPS、防火墙、备份和验证步骤。
 - `..\tech-validation\validation-report.md`：外部协议、风险和 Go/No-Go 总结。
 - `..\tech-validation\live-test-runbook.md`：具备真实账号与权限后的现场验证步骤。

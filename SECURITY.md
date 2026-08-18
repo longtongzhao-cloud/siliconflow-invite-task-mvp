@@ -6,6 +6,8 @@
 
 公开任务接口不得返回邀请码或官方邀请链接；这些信息只允许在抢单成功后通过本人会话读取。抢单人提交的 SiliconFlow 用户 ID 仅作为加密的待核验声明，不得直接触发注册、认证或奖励状态。远程浏览器模式在受信 HTTPS 网关、一次性 viewer、回调验签和销毁机制完成前必须保持 `disabled`。
 
+测试部署必须显式配置 `MVP_ALLOWED_HOSTS`，Uvicorn 只监听回环地址。证书申请前的 HTTP 服务只允许 ACME 验证，禁止通过明文 HTTP 使用管理台或传输客户数据。SQLite 只允许单应用进程，并通过 SQLite backup API 备份；直接复制运行中的数据库文件不属于有效备份。
+
 ## 报告安全问题
 
 不要在公开 Issue 中提交漏洞利用细节、真实账号、手机号、OTP、Cookie、令牌、支付流水或数据库副本。仓库所有者应在 GitHub 创建仓库后启用 Private vulnerability reporting，并通过该渠道接收报告。

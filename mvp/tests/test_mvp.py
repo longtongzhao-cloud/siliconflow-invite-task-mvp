@@ -157,6 +157,11 @@ def test_admin_manual_order_requires_no_taobao_event(
         assert created == 1
 
 
+def test_untrusted_host_is_rejected(client: TestClient) -> None:
+    response = client.get("/api/health", headers={"Host": "attacker.example"})
+    assert response.status_code == 400
+
+
 def test_claim_requires_login_and_alipay(client: TestClient) -> None:
     order = create_order(client, "T-AUTH-001", mode="manual")
     activate_manual(client, order)

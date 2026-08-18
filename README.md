@@ -8,7 +8,7 @@
 
 ```text
 .
-|-- mvp/                    # FastAPI 应用、静态前端、测试和使用文档
+|-- mvp/                    # FastAPI 应用、静态前端、测试、部署和使用文档
 |-- tech-validation/        # 只读协议探针、业务规则和安全验证
 |-- .github/                # GitHub Actions 与 PR 模板
 |-- CONTRIBUTING.md         # 协作流程和提交要求
@@ -55,6 +55,8 @@ cd ./mvp
 ```
 
 Linux 服务启动冒烟测试：`./mvp/smoke-test.sh`。
+
+Ubuntu 单机测试部署资产位于 `mvp/deploy/`。在购买域名和服务器前可先执行 `sudo bash mvp/deploy/validate-assets.sh`；完整流程见 [Ubuntu 测试部署](mvp/deploy/README.md)。
 
 运行完整技术验证：
 

@@ -27,6 +27,8 @@ Linux/macOS 开发者运行：
 ```bash
 cd ./mvp
 ./run-tests.sh
+sudo bash ./deploy/validate-assets.sh
+bash ./deploy/production-smoke-test.sh
 
 cd ../tech-validation
 ./run-validation.sh

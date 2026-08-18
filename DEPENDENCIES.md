@@ -1,6 +1,6 @@
 # 依赖说明
 
-最后核对日期：2026-08-16
+最后核对日期：2026-08-18
 
 ## Python
 
@@ -47,7 +47,13 @@ python -m pip check
 
 Ubuntu 的 PowerShell 7 应按 [Microsoft 官方安装说明](https://learn.microsoft.com/powershell/scripting/install/install-ubuntu) 从 Microsoft Package Repository 安装。
 
-完整验证中的只读探针会访问参考站点，因此可能受网络、站点状态或对方页面变更影响。GitHub CI 只运行确定性的本地规则、并发、会话安全和敏感输出检查，不运行外部网络探针。Ubuntu CI 还会对 Bash 脚本做语法检查，并启动服务验证 `/api/health`。
+## 测试部署
+
+Ubuntu 单机部署脚本使用系统包：`ca-certificates`、`curl`、`nginx`、`openssl`、`python3`、`python3-venv`、`rsync`、`ufw` 和 `certbot`。应用不依赖 Docker。Nginx 只代理到本机 `127.0.0.1:8765`，证书通过 Certbot webroot 模式申请。
+
+`mvp/deploy/validate-assets.sh` 会检查 Bash，在已安装 ShellCheck 时执行静态分析，并验证 systemd；已安装 Nginx/openssl 时还会解析 HTTP 和 HTTPS 模板。`mvp/deploy/production-smoke-test.sh` 使用临时数据库与测试专用密钥启动生产配置，不接触真实外部平台。
+
+完整验证中的只读探针会访问参考站点，因此可能受网络、站点状态或对方页面变更影响。GitHub CI 只运行确定性的本地规则、并发、会话安全和敏感输出检查，不运行外部网络探针。Ubuntu CI 还会验证 Bash/systemd 部署资产，并分别以开发和生产失败关闭配置启动服务验证 `/api/health`。
 
 ## 升级规则
 

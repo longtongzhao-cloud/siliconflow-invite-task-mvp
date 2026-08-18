@@ -74,6 +74,23 @@ def init_schema() -> None:
             created_at INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_site_otps_phone ON site_otps(phone_hmac, created_at DESC);
+        CREATE TABLE IF NOT EXISTS site_sms_requests (
+            id TEXT PRIMARY KEY,
+            phone_hmac TEXT NOT NULL,
+            phone_mask TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            provider_out_id TEXT NOT NULL UNIQUE,
+            provider_reference_hmac TEXT,
+            status TEXT NOT NULL,
+            verify_attempts INTEGER NOT NULL DEFAULT 0,
+            expires_at INTEGER NOT NULL,
+            verified_at INTEGER,
+            created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_site_sms_requests_phone
+            ON site_sms_requests(phone_hmac, created_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_site_sms_requests_created
+            ON site_sms_requests(created_at DESC);
         CREATE TABLE IF NOT EXISTS orders (
             id TEXT PRIMARY KEY,
             taobao_tid TEXT NOT NULL UNIQUE,
@@ -292,6 +309,8 @@ def sweep(conn: sqlite3.Connection, now: int | None = None) -> None:
         """,
         (current,),
     )
+    conn.execute("DELETE FROM site_otps WHERE created_at<=?", (current - 86400,))
+    conn.execute("DELETE FROM site_sms_requests WHERE created_at<=?", (current - 86400,))
 
 
 def metrics(conn: sqlite3.Connection, order_id: str, now: int | None = None) -> dict[str, int]:

@@ -16,6 +16,7 @@ Ubuntu/WSL 需要安装 `python3-venv`：`sudo apt-get install python3-venv`。W
 | `starlette` | FastAPI 的 ASGI 基础；显式固定已审计版本 |
 | `uvicorn` | 本地 ASGI 服务 |
 | `cryptography` | AES-256-GCM 字段加密 |
+| `alibabacloud-dypnsapi20170525` | 阿里云号码认证服务短信发送与核验官方 SDK；仅 `aliyun-dypns` 模式发起外部调用 |
 
 开发与测试依赖位于 `mvp/requirements-dev.txt`：
 
@@ -54,6 +55,8 @@ Ubuntu 单机部署脚本使用系统包：`ca-certificates`、`curl`、`nginx`�
 WSL 临时公网联调额外使用 Cloudflare 官方签名 APT 仓库中的 `cloudflared`。它只服务于短时 Quick Tunnel 测试，不是应用运行依赖，也不进入 Python 依赖文件；安装和清理边界见 `mvp/deploy/wsl/README.md`。
 
 `mvp/deploy/validate-assets.sh` 会检查 Bash，在已安装 ShellCheck 时执行静态分析，并验证 systemd；已安装 Nginx/openssl 时还会解析 HTTP 和 HTTPS 模板。`mvp/deploy/production-smoke-test.sh` 使用临时数据库与测试专用密钥启动生产配置，不接触真实外部平台。
+
+真实本站短信使用阿里云 PNVS 出站 API，不要求短信回调地址。SDK 已固定版本；没有完整环境变量与测试手机号白名单时应用会在启动或调用前失败关闭，测试套件使用假客户端，不发送短信。
 
 完整验证中的只读探针会访问参考站点，因此可能受网络、站点状态或对方页面变更影响。GitHub CI 只运行确定性的本地规则、并发、会话安全和敏感输出检查，不运行外部网络探针。Ubuntu CI 还会验证 Bash/systemd 部署资产，并分别以开发和生产失败关闭配置启动服务验证 `/api/health`。
 

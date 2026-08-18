@@ -1,7 +1,7 @@
 # 邀新任务台 MVP 使用说明
 
-最后核对日期：2026-08-17
-适用版本：当前本地 MVP
+最后核对日期：2026-08-18
+适用版本：当前本地/WSL 受控测试 MVP
 
 ## 使用边界
 
@@ -9,7 +9,7 @@
 
 - SiliconFlow 真实登录、邀请码读取、注册和实名认证状态查询尚未接通。
 - 第一阶段明确不使用淘宝订单 API、店铺授权、消息订阅或聊天自动发送；订单与客户链接均由运营人员人工处理。
-- 本站手机号登录只在开发模式使用演示验证码，不会发送真实短信；生产模式会禁用该接口，直至接入真实短信。
+- 本站手机号默认使用开发演示验证码；阿里云 PNVS 真实短信适配器已经实现，但只有完成账号开通、RAM 凭据配置和测试手机号白名单后才能显式启用，尚未现场真发通过。
 - SiliconFlow 登录入口已经按失败关闭方式接入，但真实远程 Chromium/WebRTC 网关尚未配置，当前会提示使用手动邀请码。
 - 支付宝奖励由管理员线下转账，系统只登记支付结果，不会自动付款。
 - 本地服务默认只允许本机访问。仓库已有 Ubuntu/HTTPS/备份部署资产，但尚未在真实域名和服务器执行，也仍没有生产级管理员 MFA、KMS 和监控。
@@ -56,7 +56,7 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1 -Port 8766
 
 开发验证码会在页面点击“获取验证码”后显示。管理员应使用启动环境中的 `MVP_ADMIN_KEY`；当前仓库已有本地演示配置说明，参见 `README.md`。任何演示值都不得复用于公网部署。
 
-生产配置参考 `.env.production.example`。应用会拒绝生产环境中的演示密钥、示例占位值、mock 短信、mock SiliconFlow 和演示数据初始化。该保护不代表生产接入已经完成；真实短信尚未接通时，手机号发送和校验接口会返回“本站短信服务尚未启用”。
+生产配置参考 `.env.production.example`。应用会拒绝生产环境中的演示密钥、示例占位值、mock 短信、mock SiliconFlow 和演示数据初始化。阿里云真实短信配置与 WSL 真发步骤见 `ALIYUN_SMS_SETUP.md`；保持 `disabled` 时，手机号发送和校验接口会返回“本站短信服务尚未启用”。
 
 Linux/macOS 在 `mvp` 目录执行 `./run.sh`。端口通过环境变量调整，例如：
 
@@ -193,8 +193,13 @@ Mock 按钮只在 `development` 环境出现，不能证明真人已经在 Silic
 **显示名额已满但完成数未满**  
 保护中的抢单人也会占用容量。其 30 分钟保护期结束后，页面再次请求服务端状态才会显示释放结果。
 
-**没有收到真实短信或没有同步淘宝/SiliconFlow 数据**  
-这是当前版本的已知边界，不是本地配置错误。相关 live 接入尚未完成。
+**没有收到真实短信**
+
+默认 `mock` 模式不会真发。只有按 `ALIYUN_SMS_SETUP.md` 开通阿里云号码认证服务、配置全部环境变量并使用白名单测试号码后才会发送；供应商拒绝时不会回退演示码。
+
+**没有同步淘宝/SiliconFlow 数据**
+
+相关 live 接入尚未完成，这是当前版本边界。
 
 ## 复验
 
@@ -204,7 +209,7 @@ Mock 按钮只在 `development` 环境出现，不能证明真人已经在 Silic
 powershell -ExecutionPolicy Bypass -File .\run-tests.ps1
 ```
 
-当前基线应得到 56 项测试通过。外部技术验证在 `..\tech-validation` 目录执行：
+当前基线应得到 73 项测试通过。外部技术验证在 `..\tech-validation` 目录执行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\run-validation.ps1
@@ -225,6 +230,7 @@ cd ../tech-validation
 - `PROJECT_STATUS.md`：当前阶段、已知阻塞和下一步开发顺序。
 - `MVP-STAGE-REPORT.md`：MVP 阶段验收结论。
 - `README.md`：项目概览、开发配置和快速启动。
+- `ALIYUN_SMS_SETUP.md`：个人开发者开通阿里云短信认证、最小 RAM 权限与真发验收。
 - `deploy/wsl/README.md`：无需购买域名和服务器的 WSL 临时公网手机联调步骤。
 - `deploy/README.md`：Ubuntu 测试服务器、DNS、HTTPS、防火墙、备份和验证步骤。
 - `..\tech-validation\validation-report.md`：外部协议、风险和 Go/No-Go 总结。

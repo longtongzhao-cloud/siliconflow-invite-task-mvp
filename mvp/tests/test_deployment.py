@@ -132,6 +132,12 @@ def test_quick_tunnel_requires_explicit_risk_and_ephemeral_data() -> None:
     assert 'rm -rf -- "${runtime_dir}"' in script
     assert "*.trycloudflare.com" not in script
     assert "--self-test-flow" in script
+    assert "--accept-real-sms-cost" in script
+    assert "MVP_SITE_SMS_ALLOWED_PHONES" in script
+    assert "duration < 1 || duration > 3600" in script
+    assert "--self-test-flow cannot send real SMS" in script
+    assert "MVP_SITE_SMS_MAX_SENDS_PER_HOUR=5" in script
+    assert "MVP_SITE_SMS_MAX_SENDS_PER_DAY=10" in script
 
     flow = (DEPLOY_ROOT / "wsl" / "quick_tunnel_flow.py").read_text(
         encoding="utf-8"

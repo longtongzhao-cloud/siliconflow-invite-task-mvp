@@ -29,6 +29,7 @@ from .security import (
     token_hash,
     verify_session,
 )
+from .site_sms import SiteSmsProvider, build_site_sms_provider
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -63,7 +64,7 @@ class PhoneRequest(BaseModel):
 
 class PhoneVerify(BaseModel):
     phone: str
-    code: str
+    code: str = Field(min_length=4, max_length=8)
 
 
 class AlipayBind(BaseModel):
@@ -167,10 +168,14 @@ def require_admin(x_admin_key: str | None) -> None:
         raise HTTPException(401, "管理员密钥不正确")
 
 
-def require_site_sms() -> str:
-    if SETTINGS.site_sms_mode != "mock" or not SETTINGS.development_site_otp:
-        raise AdapterError("SITE_SMS_DISABLED", "本站短信服务尚未启用", 503)
-    return SETTINGS.development_site_otp
+def require_site_sms() -> SiteSmsProvider:
+    return build_site_sms_provider(SETTINGS)
+
+
+def require_allowed_site_sms_phone(phone: str) -> None:
+    allowed = SETTINGS.site_sms_allowed_phones
+    if allowed and phone not in allowed:
+        raise HTTPException(403, "当前受控测试仅允许已授权手机号")
 
 
 def get_order_by_customer_token(conn: sqlite3.Connection, raw_token: str) -> sqlite3.Row:
@@ -299,52 +304,144 @@ def health() -> dict[str, Any]:
 
 
 @app.post("/api/auth/send-code")
-def send_site_code(body: PhoneRequest) -> dict[str, Any]:
-    site_otp = require_site_sms()
+def send_site_code(body: PhoneRequest, request: Request) -> dict[str, Any]:
+    require_web_request(request)
+    provider = require_site_sms()
     phone = normalize_phone(body.phone)
+    require_allowed_site_sms_phone(phone)
     current = db.now_ts()
     phone_key = hmac_hex(phone, "phone-index")
+    sms_request_id = db.new_id("sms")
     with db.connect(immediate=True) as conn:
-        recent = conn.execute(
-            "SELECT COUNT(*) AS n FROM site_otps WHERE phone_hmac=? AND created_at>?",
+        db.sweep(conn, current)
+        last_send = conn.execute(
+            "SELECT created_at FROM site_sms_requests WHERE phone_hmac=? ORDER BY created_at DESC LIMIT 1",
+            (phone_key,),
+        ).fetchone()
+        if last_send and last_send["created_at"] > current - 60:
+            raise HTTPException(429, "请在 60 秒后重新获取验证码")
+        phone_hourly = conn.execute(
+            "SELECT COUNT(*) AS n FROM site_sms_requests WHERE phone_hmac=? AND created_at>?",
             (phone_key, current - 3600),
         ).fetchone()["n"]
-        if recent >= 5:
+        if phone_hourly >= 5:
             raise HTTPException(429, "验证码请求过于频繁，请稍后再试")
+        global_hourly = conn.execute(
+            "SELECT COUNT(*) AS n FROM site_sms_requests WHERE created_at>?",
+            (current - 3600,),
+        ).fetchone()["n"]
+        global_daily = conn.execute(
+            "SELECT COUNT(*) AS n FROM site_sms_requests WHERE created_at>?",
+            (current - 86400,),
+        ).fetchone()["n"]
+        if global_hourly >= SETTINGS.site_sms_max_sends_per_hour:
+            raise HTTPException(429, "本站验证码小时发送额度已用完")
+        if global_daily >= SETTINGS.site_sms_max_sends_per_day:
+            raise HTTPException(429, "本站验证码今日发送额度已用完")
+        conn.execute(
+            "UPDATE site_sms_requests SET status='SUPERSEDED' WHERE phone_hmac=? AND status IN ('REQUESTED','SENT')",
+            (phone_key,),
+        )
         conn.execute(
             """
-            INSERT INTO site_otps(id,phone_hmac,phone_mask,code_hmac,expires_at,created_at)
-            VALUES(?,?,?,?,?,?)
+            INSERT INTO site_sms_requests(
+                id,phone_hmac,phone_mask,provider,provider_out_id,status,expires_at,created_at
+            ) VALUES(?,?,?,?,?,?,?,?)
             """,
-            (db.new_id("otp"), phone_key, mask_phone(phone), hmac_hex(site_otp, "site-otp"),
-             current + 300, current),
+            (
+                sms_request_id,
+                phone_key,
+                mask_phone(phone),
+                provider.name,
+                sms_request_id,
+                "REQUESTED",
+                current + 300,
+                current,
+            ),
+        )
+
+    try:
+        send_result = provider.send_code(phone, sms_request_id)
+    except Exception:
+        with db.connect(immediate=True) as conn:
+            conn.execute(
+                "UPDATE site_sms_requests SET status='FAILED' WHERE id=? AND status='REQUESTED'",
+                (sms_request_id,),
+            )
+        raise
+
+    with db.connect(immediate=True) as conn:
+        provider_reference_hmac = (
+            hmac_hex(send_result.provider_reference, "site-sms-provider-reference")
+            if send_result.provider_reference
+            else None
+        )
+        conn.execute(
+            """
+            UPDATE site_sms_requests
+            SET status='SENT',provider_reference_hmac=?
+            WHERE id=? AND status='REQUESTED'
+            """,
+            (provider_reference_hmac, sms_request_id),
+        )
+        audit(
+            conn,
+            "ANONYMOUS",
+            phone_key,
+            "SITE_SMS_SENT",
+            "SITE_SMS_REQUEST",
+            sms_request_id,
+            {"provider": provider.name},
         )
     response = {"masked_phone": mask_phone(phone), "expires_in_seconds": 300}
-    if SETTINGS.is_development:
-        response["debug_code"] = site_otp
+    if SETTINGS.is_development and SETTINGS.site_sms_mode == "mock":
+        response["debug_code"] = SETTINGS.development_site_otp
     return response
 
 
 @app.post("/api/auth/verify")
-def verify_site_code(body: PhoneVerify, response: Response) -> dict[str, Any]:
-    require_site_sms()
+def verify_site_code(
+    body: PhoneVerify, response: Response, request: Request
+) -> dict[str, Any]:
+    require_web_request(request)
+    provider = require_site_sms()
     phone = normalize_phone(body.phone)
+    require_allowed_site_sms_phone(phone)
     current = db.now_ts()
     phone_key = hmac_hex(phone, "phone-index")
     with db.connect(immediate=True) as conn:
         record = conn.execute(
             """
-            SELECT * FROM site_otps
-            WHERE phone_hmac=? AND consumed_at IS NULL
+            SELECT * FROM site_sms_requests
+            WHERE phone_hmac=? AND status IN ('REQUESTED','SENT') AND verified_at IS NULL
             ORDER BY created_at DESC LIMIT 1
             """,
             (phone_key,),
         ).fetchone()
         if not record or record["expires_at"] <= current:
             raise HTTPException(400, "验证码已过期，请重新获取")
-        if not hmac.compare_digest(record["code_hmac"], hmac_hex(body.code, "site-otp")):
-            raise HTTPException(400, "验证码不正确")
-        conn.execute("UPDATE site_otps SET consumed_at=? WHERE id=?", (current, record["id"]))
+        if record["provider"] != provider.name:
+            raise HTTPException(409, "验证码服务配置已更新，请重新获取")
+        if record["verify_attempts"] >= 5:
+            raise HTTPException(429, "验证码尝试次数过多，请重新获取")
+        conn.execute(
+            "UPDATE site_sms_requests SET verify_attempts=verify_attempts+1 WHERE id=?",
+            (record["id"],),
+        )
+
+    if not provider.verify_code(phone, body.code, record["provider_out_id"]):
+        raise HTTPException(400, "验证码不正确")
+
+    with db.connect(immediate=True) as conn:
+        consumed = conn.execute(
+            """
+            UPDATE site_sms_requests SET status='VERIFIED',verified_at=?
+            WHERE id=? AND verified_at IS NULL AND status IN ('REQUESTED','SENT')
+            """,
+            (current, record["id"]),
+        )
+        if consumed.rowcount != 1:
+            raise HTTPException(400, "验证码已使用，请重新获取")
         user = conn.execute("SELECT * FROM users WHERE phone_hmac=?", (phone_key,)).fetchone()
         if not user:
             user_id = db.new_id("usr")
@@ -353,7 +450,15 @@ def verify_site_code(body: PhoneVerify, response: Response) -> dict[str, Any]:
                 (user_id, phone_key, mask_phone(phone), current),
             )
             user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-        audit(conn, "USER", user["id"], "LOGIN", "USER", user["id"])
+        audit(
+            conn,
+            "USER",
+            user["id"],
+            "LOGIN",
+            "USER",
+            user["id"],
+            {"site_sms_provider": provider.name},
+        )
     response.set_cookie(
         "mvp_session", sign_session(user["id"]), httponly=True, secure=SETTINGS.cookie_secure,
         samesite="lax", max_age=7 * 24 * 3600, path="/",

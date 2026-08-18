@@ -38,9 +38,13 @@ def client(database_path: Path):
 
 
 def register_worker(client: TestClient, phone: str, alipay: str | None = None) -> None:
-    sent = client.post("/api/auth/send-code", json={"phone": phone})
+    sent = client.post("/api/auth/send-code", headers=WEB_HEADERS, json={"phone": phone})
     assert sent.status_code == 200
-    verified = client.post("/api/auth/verify", json={"phone": phone, "code": "135790"})
+    verified = client.post(
+        "/api/auth/verify",
+        headers=WEB_HEADERS,
+        json={"phone": phone, "code": "135790"},
+    )
     assert verified.status_code == 200
     if alipay:
         bound = client.put(
@@ -303,9 +307,14 @@ def test_disabled_site_sms_fails_closed(
         ),
     )
 
-    sent = client.post("/api/auth/send-code", json={"phone": "13900000010"})
+    sent = client.post(
+        "/api/auth/send-code",
+        headers=WEB_HEADERS,
+        json={"phone": "13900000010"},
+    )
     verified = client.post(
         "/api/auth/verify",
+        headers=WEB_HEADERS,
         json={"phone": "13900000010", "code": "135790"},
     )
 

@@ -11,7 +11,7 @@
 - 生产配置必须声明 `MVP_ALLOWED_HOSTS`，未知 Host 会被应用拒绝。
 - SQLite 数据位于 `/var/lib/siliconflow-invite-task/mvp.db`，只运行一个应用进程。
 - 每天创建一次 SQLite 在线一致性备份，默认保留 7 天；备份位于 `/var/backups/siliconflow-invite-task/`。
-- 当前短信为 `disabled`、SiliconFlow 为 `manual`、远程浏览器为 `disabled`。因此测试环境可验证人工建单、客户链接和手动邀请码，但抢单人真实短信登录和代理登录仍不可用。
+- 安装脚本默认短信为 `disabled`、SiliconFlow 为 `manual`、远程浏览器为 `disabled`。阿里云短信适配器虽已实现，仍须按 `../ALIYUN_SMS_SETUP.md` 完成账号开通和受控真发后再修改环境文件；真实 SiliconFlow 代理登录仍不可用。
 - 安装脚本不会自动启用 UFW，也不会在 DNS 未解析时申请证书。
 - 证书启用前，Nginx 的 HTTP 配置只响应 ACME 验证，其余请求返回 503；不要通过 HTTP 使用管理台或传输客户数据。
 

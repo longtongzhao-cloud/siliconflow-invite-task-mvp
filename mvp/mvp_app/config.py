@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 DEVELOPMENT_SECRET = "local-mvp-secret-change-before-production"
@@ -31,6 +31,14 @@ class Settings:
     site_sms_mode: str
     remote_browser_mode: str
     development_site_otp: str | None
+    aliyun_access_key_id: str | None = field(repr=False)
+    aliyun_access_key_secret: str | None = field(repr=False)
+    site_sms_sign_name: str | None
+    site_sms_template_code: str | None
+    site_sms_scheme_name: str | None
+    site_sms_allowed_phones: tuple[str, ...] = field(repr=False)
+    site_sms_max_sends_per_hour: int
+    site_sms_max_sends_per_day: int
     seed_demo: bool
 
     @property
@@ -45,6 +53,21 @@ def _parse_bool(value: str, name: str) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     raise ConfigurationError(f"{name} must be a boolean value")
+
+
+def _parse_bounded_int(value: str, name: str, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ConfigurationError(f"{name} must be an integer") from exc
+    if not minimum <= parsed <= maximum:
+        raise ConfigurationError(f"{name} must be between {minimum} and {maximum}")
+    return parsed
+
+
+def _optional(values: Mapping[str, str], name: str) -> str | None:
+    value = values.get(name, "").strip()
+    return value or None
 
 
 def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
@@ -87,8 +110,10 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     site_sms_mode = values.get(
         "MVP_SITE_SMS_MODE", "mock" if is_development else "disabled"
     ).strip().lower()
-    if site_sms_mode not in {"mock", "disabled"}:
-        raise ConfigurationError("MVP_SITE_SMS_MODE must be mock or disabled")
+    if site_sms_mode not in {"mock", "aliyun-dypns", "disabled"}:
+        raise ConfigurationError(
+            "MVP_SITE_SMS_MODE must be mock, aliyun-dypns, or disabled"
+        )
 
     remote_browser_mode = values.get("MVP_REMOTE_BROWSER_MODE", "disabled").strip().lower()
     if remote_browser_mode != "disabled":
@@ -110,6 +135,66 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         development_site_otp = values.get("MVP_DEV_SITE_OTP", DEVELOPMENT_SITE_OTP)
         if not re.fullmatch(r"\d{6}", development_site_otp):
             raise ConfigurationError("MVP_DEV_SITE_OTP must contain exactly 6 digits")
+
+    aliyun_access_key_id = _optional(values, "ALIBABA_CLOUD_ACCESS_KEY_ID")
+    aliyun_access_key_secret = _optional(values, "ALIBABA_CLOUD_ACCESS_KEY_SECRET")
+    site_sms_sign_name = _optional(values, "MVP_SITE_SMS_SIGN_NAME")
+    site_sms_template_code = _optional(values, "MVP_SITE_SMS_TEMPLATE_CODE")
+    site_sms_scheme_name = _optional(values, "MVP_SITE_SMS_SCHEME_NAME")
+    allowed_phone_values = tuple(
+        dict.fromkeys(
+            re.sub(r"[ +()-]", "", phone)
+            for phone in values.get("MVP_SITE_SMS_ALLOWED_PHONES", "").split(",")
+            if phone.strip()
+        )
+    )
+    site_sms_allowed_phones = tuple(
+        phone[2:] if phone.startswith("86") and len(phone) == 13 else phone
+        for phone in allowed_phone_values
+    )
+    if any(not re.fullmatch(r"1[3-9]\d{9}", phone) for phone in site_sms_allowed_phones):
+        raise ConfigurationError("MVP_SITE_SMS_ALLOWED_PHONES contains an invalid phone")
+    if len(site_sms_allowed_phones) > 5:
+        raise ConfigurationError("MVP_SITE_SMS_ALLOWED_PHONES supports at most 5 phones")
+    site_sms_max_sends_per_hour = _parse_bounded_int(
+        values.get("MVP_SITE_SMS_MAX_SENDS_PER_HOUR", "20"),
+        "MVP_SITE_SMS_MAX_SENDS_PER_HOUR",
+        1,
+        1000,
+    )
+    site_sms_max_sends_per_day = _parse_bounded_int(
+        values.get("MVP_SITE_SMS_MAX_SENDS_PER_DAY", "50"),
+        "MVP_SITE_SMS_MAX_SENDS_PER_DAY",
+        1,
+        10000,
+    )
+    if site_sms_max_sends_per_day < site_sms_max_sends_per_hour:
+        raise ConfigurationError(
+            "MVP_SITE_SMS_MAX_SENDS_PER_DAY cannot be lower than the hourly limit"
+        )
+    if site_sms_mode == "aliyun-dypns":
+        required_aliyun_values = {
+            "ALIBABA_CLOUD_ACCESS_KEY_ID": aliyun_access_key_id,
+            "ALIBABA_CLOUD_ACCESS_KEY_SECRET": aliyun_access_key_secret,
+            "MVP_SITE_SMS_SIGN_NAME": site_sms_sign_name,
+            "MVP_SITE_SMS_TEMPLATE_CODE": site_sms_template_code,
+            "MVP_SITE_SMS_SCHEME_NAME": site_sms_scheme_name,
+        }
+        missing = [name for name, value in required_aliyun_values.items() if not value]
+        if missing:
+            raise ConfigurationError(
+                f"aliyun-dypns requires {', '.join(missing)}"
+            )
+        if any(value.startswith(PLACEHOLDER_PREFIX) for value in required_aliyun_values.values()):
+            raise ConfigurationError("aliyun-dypns settings cannot use placeholder values")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", site_sms_template_code or ""):
+            raise ConfigurationError("MVP_SITE_SMS_TEMPLATE_CODE is invalid")
+        if not 1 <= len(site_sms_scheme_name or "") <= 20:
+            raise ConfigurationError("MVP_SITE_SMS_SCHEME_NAME must contain 1 to 20 characters")
+        if not site_sms_allowed_phones:
+            raise ConfigurationError(
+                "aliyun-dypns requires MVP_SITE_SMS_ALLOWED_PHONES during controlled acceptance"
+            )
 
     if not is_development:
         if (
@@ -147,6 +232,14 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         site_sms_mode=site_sms_mode,
         remote_browser_mode=remote_browser_mode,
         development_site_otp=development_site_otp,
+        aliyun_access_key_id=aliyun_access_key_id,
+        aliyun_access_key_secret=aliyun_access_key_secret,
+        site_sms_sign_name=site_sms_sign_name,
+        site_sms_template_code=site_sms_template_code,
+        site_sms_scheme_name=site_sms_scheme_name,
+        site_sms_allowed_phones=site_sms_allowed_phones,
+        site_sms_max_sends_per_hour=site_sms_max_sends_per_hour,
+        site_sms_max_sends_per_day=site_sms_max_sends_per_day,
         seed_demo=seed_demo,
     )
 

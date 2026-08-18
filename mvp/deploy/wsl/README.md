@@ -7,15 +7,17 @@
 - 淘宝人工建单、复制客户链接；
 - 客户和抢单人在不同手机网络打开页面；
 - mock SiliconFlow 登录、邀请码、抢单、人工核验和奖励状态机；
+- 显式配置后，仅对白名单测试手机号验证阿里云本站短信发送和核验；
 - HTTPS 下的 Secure Cookie、可信 Host 和移动端页面。
 
-它不能验证真实短信、真实 SiliconFlow 会话/认证状态、长期运行、固定域名、云防火墙或服务器重启恢复。
+默认 mock 流程不能验证真实短信；即使启用阿里云本站短信，它仍不能验证真实 SiliconFlow 会话/认证状态、长期运行、固定域名、云防火墙或服务器重启恢复。
 
 ## 安全边界
 
 - Quick Tunnel 是公开互联网地址，不是内网共享。
-- 只允许使用合成手机号、支付宝资料、订单号和 SiliconFlow ID。
-- 不得输入真实 OTP、Cookie、支付流水、身份证或生产数据。
+- 默认 mock 模式只允许合成手机号、支付宝资料、订单号和 SiliconFlow ID。
+- `aliyun-dypns` 模式只允许白名单测试手机号及其本站 OTP 为真实值；支付宝、订单、SiliconFlow ID 和支付流水仍必须为合成数据。
+- 不得输入真实 SiliconFlow OTP/Cookie、支付宝资料、身份证或其他生产数据。
 - 每次启动使用新的随机 URL、密钥和临时数据库；按 `Ctrl+C` 后全部删除。
 - URL 无访问控制。脚本要求显式传入 `--accept-public-demo-risk`，避免误启动。
 - 电脑休眠、关机、网络断开或脚本退出后，地址立即不可用。
@@ -52,5 +54,7 @@ sudo ./deploy/wsl/install-cloudflared.sh
 ./deploy/wsl/start-quick-tunnel.sh \
   --accept-public-demo-risk --self-test-flow --duration 5
 ```
+
+真实本站短信验收不会自动运行，必须先完成 `../../ALIYUN_SMS_SETUP.md` 的账号侧步骤，并在私密 WSL 终端执行其中的限时启动命令。脚本要求 `--accept-real-sms-cost`、1 到 3600 秒时长和白名单手机号，且硬限制 5 条/小时、10 条/日。
 
 若 `~/.cloudflared/config.yml` 或 `config.yaml` 已存在，脚本会使用独立的空配置文件，不读取或修改现有 Tunnel 配置。
